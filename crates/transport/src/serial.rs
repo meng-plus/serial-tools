@@ -1,14 +1,12 @@
 //! 串口传输层实现
 
 use super::*;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::Mutex;
 
 pub struct SerialTransport {
-    port: Option<Box<dyn serialport::SerialPort>>,
+    port: Mutex<Option<Box<dyn serialport::SerialPort>>>,
     descriptor: TransportDescriptor,
     config: SerialConfig,
-    active: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Clone)]
@@ -27,10 +25,9 @@ impl SerialTransport {
             address: config.port.clone(),
         };
         Self {
-            port: None,
+            port: Mutex::new(None),
             descriptor,
             config,
-            active: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -39,7 +36,7 @@ impl SerialTransport {
             .map(|ports| {
                 ports.into_iter().map(|p| PortInfo {
                     name: p.port_name,
-                    description: p.description,
+                    description: format!("{:?}", p.port_type),
                 }).collect()
             })
             .unwrap_or_default()
@@ -78,29 +75,29 @@ impl Transport for SerialTransport {
             .open()
             .map_err(|e| TransportError::Connect(e.to_string()))?;
 
-        self.port = Some(port);
-        self.active.store(true, Ordering::SeqCst);
+        *self.port.lock().unwrap() = Some(port);
         Ok(())
     }
 
     fn close(&mut self) -> Result<(), TransportError> {
-        self.port = None;
-        self.active.store(false, Ordering::SeqCst);
+        *self.port.lock().unwrap() = None;
         Ok(())
     }
 
     fn write(&self, bytes: &[u8]) -> Result<usize, TransportError> {
-        let port = self.port.as_ref().ok_or(TransportError::NotConnected)?;
+        let mut guard = self.port.lock().unwrap();
+        let port = guard.as_mut().ok_or(TransportError::NotConnected)?;
         port.write(bytes).map_err(|e| TransportError::Send(e.to_string()))
     }
 
     fn read(&self, buf: &mut [u8]) -> Result<usize, TransportError> {
-        let port = self.port.as_ref().ok_or(TransportError::NotConnected)?;
+        let mut guard = self.port.lock().unwrap();
+        let port = guard.as_mut().ok_or(TransportError::NotConnected)?;
         port.read(buf).map_err(|e| TransportError::Receive(e.to_string()))
     }
 
     fn is_active(&self) -> bool {
-        self.active.load(Ordering::SeqCst)
+        self.port.lock().unwrap().is_some()
     }
 
     fn descriptor(&self) -> &TransportDescriptor {

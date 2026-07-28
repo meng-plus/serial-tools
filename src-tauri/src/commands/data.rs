@@ -5,6 +5,7 @@ use tauri::State;
 
 #[derive(serde::Deserialize)]
 pub struct SendDataRequest {
+    pub channel_id: String,
     pub data: String,
     pub format: String, // text / hex
     pub suffix: Option<String>, // none / cr / lf / crlf
@@ -22,13 +23,18 @@ pub struct PacketResponse {
     pub total: usize,
 }
 
+/// 发送数据到指定通道
 #[tauri::command]
 pub async fn send_data(
     request: SendDataRequest,
     state: State<'_, AppState>,
 ) -> Result<SendDataResponse, String> {
-    if !state.is_connected() {
-        return Err("未连接".to_string());
+    // 检查通道是否存在
+    {
+        let channels = state.channels.read().await;
+        if !channels.contains_key(&request.channel_id) {
+            return Err(format!("通道 {} 不存在", request.channel_id));
+        }
     }
 
     let bytes = match request.format.as_str() {
@@ -47,17 +53,18 @@ pub async fn send_data(
     };
 
     let len = bytes.len();
-    // TODO: 通过 channel 发送
+    state.send_to_channel(&request.channel_id, &bytes).await?;
 
+    // 记录 TX 包
     let entry = PacketEntry {
         timestamp: chrono::Local::now().format("%H:%M:%S%.3f").to_string(),
         direction: "tx".to_string(),
-        source: state.port_name.read().await.clone().unwrap_or_default(),
+        channel_id: request.channel_id,
         bytes: bytes.clone(),
         hex: hex::encode(&bytes),
         text: String::from_utf8_lossy(&bytes).to_string(),
     };
-    state.packets.lock().await.push(entry);
+    state.push_packet(entry).await;
 
     Ok(SendDataResponse {
         success: true,
@@ -65,6 +72,7 @@ pub async fn send_data(
     })
 }
 
+/// 获取数据包（最近 N 条）
 #[tauri::command]
 pub async fn get_packets(
     limit: Option<usize>,
@@ -77,6 +85,7 @@ pub async fn get_packets(
     Ok(PacketResponse { packets: result, total })
 }
 
+/// 清空数据包
 #[tauri::command]
 pub async fn clear_packets(
     state: State<'_, AppState>,

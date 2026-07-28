@@ -25,15 +25,8 @@ hex = "0.4"
 chrono = "0.4"
 dirs = "5"
 serialport = "4"
-tokio-serial = "5"
+uuid = { version = "1", features = ["v4"] }
 transport.workspace = true
-serial-crate.workspace = true
-tcp-crate.workspace = true
-mqtt-crate.workspace = true
-framing.workspace = true
-channel.workspace = true
-protocol.workspace = true
-pipeline.workspace = true
 
 [features]
 default = ["custom-protocol"]

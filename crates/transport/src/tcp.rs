@@ -1,17 +1,15 @@
 //! TCP 传输层实现
 
 use super::*;
-use std::net::TcpStream;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use std::io::{Read, Write};
+use std::net::TcpStream;
+use std::sync::Mutex;
 
 pub struct TcpClientTransport {
-    stream: Option<TcpStream>,
+    stream: Mutex<Option<TcpStream>>,
     descriptor: TransportDescriptor,
     host: String,
     port: u16,
-    active: Arc<AtomicBool>,
 }
 
 impl TcpClientTransport {
@@ -21,11 +19,10 @@ impl TcpClientTransport {
             address: format!("{}:{}", host, port),
         };
         Self {
-            stream: None,
+            stream: Mutex::new(None),
             descriptor,
             host,
             port,
-            active: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -36,30 +33,30 @@ impl Transport for TcpClientTransport {
         let stream = TcpStream::connect(&addr)
             .map_err(|e| TransportError::Connect(e.to_string()))?;
         stream.set_read_timeout(Some(std::time::Duration::from_millis(10)))
-            .map_err(|e| TransportError::Io(e))?;
-        self.stream = Some(stream);
-        self.active.store(true, Ordering::SeqCst);
+            .map_err(TransportError::Io)?;
+        *self.stream.lock().unwrap() = Some(stream);
         Ok(())
     }
 
     fn close(&mut self) -> Result<(), TransportError> {
-        self.stream = None;
-        self.active.store(false, Ordering::SeqCst);
+        *self.stream.lock().unwrap() = None;
         Ok(())
     }
 
     fn write(&self, bytes: &[u8]) -> Result<usize, TransportError> {
-        let stream = self.stream.as_ref().ok_or(TransportError::NotConnected)?;
+        let mut guard = self.stream.lock().unwrap();
+        let stream = guard.as_mut().ok_or(TransportError::NotConnected)?;
         stream.write(bytes).map_err(|e| TransportError::Send(e.to_string()))
     }
 
     fn read(&self, buf: &mut [u8]) -> Result<usize, TransportError> {
-        let stream = self.stream.as_ref().ok_or(TransportError::NotConnected)?;
+        let mut guard = self.stream.lock().unwrap();
+        let stream = guard.as_mut().ok_or(TransportError::NotConnected)?;
         stream.read(buf).map_err(|e| TransportError::Receive(e.to_string()))
     }
 
     fn is_active(&self) -> bool {
-        self.active.load(Ordering::SeqCst)
+        self.stream.lock().unwrap().is_some()
     }
 
     fn descriptor(&self) -> &TransportDescriptor {

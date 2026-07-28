@@ -20,7 +20,7 @@ pub struct SessionInfo {
 #[tauri::command]
 pub async fn load_session(
     name: String,
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
 ) -> Result<String, String> {
     let path = config_dir().join("sessions").join(format!("{}.yaml", name));
     std::fs::read_to_string(&path).map_err(|e| format!("读取会话配置失败: {}", e))

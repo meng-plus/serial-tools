@@ -14,27 +14,20 @@ pub fn run() {
             // 连接管理
             commands::connection::connect,
             commands::connection::disconnect,
+            commands::connection::disconnect_all,
             commands::connection::list_ports,
             commands::connection::get_connection_status,
             // 数据收发
             commands::data::send_data,
             commands::data::get_packets,
             commands::data::clear_packets,
-            // 协议解析
-            commands::protocol::get_parsed_results,
-            commands::protocol::clear_parsed,
             // 端口转发
             commands::forward::start_forward,
             commands::forward::stop_forward,
             commands::forward::list_forwarders,
-            // 配置管理
-            commands::config::load_session,
-            commands::config::save_session,
-            commands::config::list_sessions,
-            commands::config::delete_session,
-            // 日志管理
+            commands::forward::delete_forwarder,
+            // 日志
             commands::log::get_logs,
-            commands::log::export_logs,
             commands::log::clear_logs,
         ])
         .run(tauri::generate_context!())
