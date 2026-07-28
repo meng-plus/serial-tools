@@ -1,0 +1,54 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/transport",
+    "crates/serial",
+    "crates/tcp",
+    "crates/mqtt",
+    "crates/framing",
+    "crates/channel",
+    "crates/protocol",
+    "crates/pipeline",
+    "src-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["mengplus <chengmeng_2@outlook.com>"]
+license = "MIT"
+repository = "https://gitea.mengplus.top/gltech/serial-tools.git"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+thiserror = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+chrono = "0.4"
+hex = "0.4"
+serialport = "4"
+regex = "1"
+tokio-serial = "5"
+bytes = "1"
+futures = "0.3"
+dashmap = "6"
+uuid = { version = "1", features = ["v4"] }
+
+# 本地 crate
+transport = { path = "crates/transport" }
+serial-crate = { path = "crates/serial" }
+tcp-crate = { path = "crates/tcp" }
+mqtt-crate = { path = "crates/mqtt" }
+framing = { path = "crates/framing" }
+channel = { path = "crates/channel" }
+protocol = { path = "crates/protocol" }
+pipeline = { path = "crates/pipeline" }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

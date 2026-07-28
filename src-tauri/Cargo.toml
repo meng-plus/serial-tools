@@ -1,0 +1,40 @@
+[package]
+name = "serial-tools"
+description = "Serial Tools - 通信集成调试平台"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lib]
+name = "serial_tools_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+hex = "0.4"
+chrono = "0.4"
+dirs = "5"
+serialport = "4"
+tokio-serial = "5"
+transport.workspace = true
+serial-crate.workspace = true
+tcp-crate.workspace = true
+mqtt-crate.workspace = true
+framing.workspace = true
+channel.workspace = true
+protocol.workspace = true
+pipeline.workspace = true
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

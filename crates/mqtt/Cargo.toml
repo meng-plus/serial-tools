@@ -1,0 +1,8 @@
+[package]
+name = "mqtt-crate"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+transport.workspace = true
+tokio.workspace = true
