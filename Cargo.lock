@@ -3766,6 +3766,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "serde",
+ "serde_json",
  "serialport",
  "thiserror 1.0.69",
  "tokio",

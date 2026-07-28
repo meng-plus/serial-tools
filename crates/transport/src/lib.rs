@@ -5,6 +5,7 @@
 pub mod serial;
 pub mod tcp;
 pub mod mqtt;
+pub mod mock;
 
 use thiserror::Error;
 
@@ -92,4 +93,208 @@ pub enum TransportConfig {
         client_id: String,
         topics: Vec<String>,
     },
+}
+
+// ══════════════════════════════════════════════════════════════
+// 单元测试
+// ══════════════════════════════════════════════════════════════
+
+#[cfg(test)]
+mod mock_tests {
+    use crate::mock::MockTransport;
+    use crate::Transport;
+
+    #[test]
+    fn test_mock_new() {
+        let mock = MockTransport::new("serial", "COM3");
+        assert!(!mock.is_active());
+        assert_eq!(mock.descriptor().kind, "serial");
+        assert_eq!(mock.descriptor().address, "COM3");
+    }
+
+    #[test]
+    fn test_mock_open_close() {
+        let mut mock = MockTransport::new("tcp", "127.0.0.1:5000");
+        assert!(!mock.is_active());
+        mock.open().unwrap();
+        assert!(mock.is_active());
+        mock.close().unwrap();
+        assert!(!mock.is_active());
+    }
+
+    #[test]
+    fn test_mock_write_before_open_fails() {
+        let mock = MockTransport::new("serial", "COM3");
+        assert!(mock.write(b"hello").is_err());
+    }
+
+    #[test]
+    fn test_mock_read_before_open_fails() {
+        let mock = MockTransport::new("serial", "COM3");
+        let mut buf = [0u8; 64];
+        assert!(mock.read(&mut buf).is_err());
+    }
+
+    #[test]
+    fn test_mock_write_records_data() {
+        let mut mock = MockTransport::new("serial", "COM3");
+        mock.open().unwrap();
+        assert_eq!(mock.write(b"hello").unwrap(), 5);
+        assert_eq!(mock.write(b"world123").unwrap(), 8);
+        assert_eq!(mock.tx_bytes(), 13);
+        assert_eq!(mock.get_tx_log(), vec![b"hello".to_vec(), b"world123".to_vec()]);
+    }
+
+    #[test]
+    fn test_mock_read_empty_returns_zero() {
+        let mut mock = MockTransport::new("serial", "COM3");
+        mock.open().unwrap();
+        let mut buf = [0u8; 64];
+        assert_eq!(mock.read(&mut buf).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_mock_read_returns_enqueued_data() {
+        let mut mock = MockTransport::new("serial", "COM3");
+        mock.open().unwrap();
+        mock.enqueue_rx(b"abc".to_vec());
+        mock.enqueue_rx(b"def".to_vec());
+        let mut buf = [0u8; 64];
+        assert_eq!(mock.read(&mut buf).unwrap(), 3);
+        assert_eq!(&buf[..3], b"abc");
+        assert_eq!(mock.read(&mut buf).unwrap(), 3);
+        assert_eq!(&buf[..3], b"def");
+        assert_eq!(mock.read(&mut buf).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_mock_read_truncates() {
+        let mut mock = MockTransport::new("serial", "COM3");
+        mock.open().unwrap();
+        mock.enqueue_rx(vec![0xAA; 100]);
+        let mut buf = [0u8; 10];
+        assert_eq!(mock.read(&mut buf).unwrap(), 10);
+        assert_eq!(buf, [0xAA; 10]);
+    }
+
+    #[test]
+    fn test_mock_clear_tx_log() {
+        let mut mock = MockTransport::new("serial", "COM3");
+        mock.open().unwrap();
+        mock.write(b"test").unwrap();
+        mock.clear_tx_log();
+        assert_eq!(mock.tx_bytes(), 0);
+    }
+
+    #[test]
+    fn test_mock_write_after_close_fails() {
+        let mut mock = MockTransport::new("serial", "COM3");
+        mock.open().unwrap();
+        mock.close().unwrap();
+        assert!(mock.write(b"x").is_err());
+    }
+
+    #[test]
+    fn test_mock_read_after_close_fails() {
+        let mut mock = MockTransport::new("serial", "COM3");
+        mock.open().unwrap();
+        mock.close().unwrap();
+        let mut buf = [0u8; 64];
+        assert!(mock.read(&mut buf).is_err());
+    }
+}
+
+#[cfg(test)]
+mod tcp_tests {
+    use crate::{Transport};
+    use crate::tcp::TcpClientTransport;
+
+    #[test]
+    fn test_tcp_new() {
+        let tcp = TcpClientTransport::new("127.0.0.1".to_string(), 9999);
+        assert!(!tcp.is_active());
+        assert_eq!(tcp.descriptor().kind, "tcp_client");
+        assert_eq!(tcp.descriptor().address, "127.0.0.1:9999");
+    }
+
+    #[test]
+    fn test_tcp_connect_refused() {
+        let mut tcp = TcpClientTransport::new("127.0.0.1".to_string(), 1);
+        assert!(tcp.open().is_err());
+        assert!(!tcp.is_active());
+    }
+
+    #[test]
+    fn test_tcp_write_before_open() {
+        let tcp = TcpClientTransport::new("127.0.0.1".to_string(), 9999);
+        assert!(tcp.write(b"test").is_err());
+    }
+
+    #[test]
+    fn test_tcp_read_before_open() {
+        let tcp = TcpClientTransport::new("127.0.0.1".to_string(), 9999);
+        let mut buf = [0u8; 64];
+        assert!(tcp.read(&mut buf).is_err());
+    }
+
+    #[test]
+    fn test_tcp_close() {
+        let mut tcp = TcpClientTransport::new("127.0.0.1".to_string(), 9999);
+        tcp.close().unwrap();
+        assert!(!tcp.is_active());
+    }
+}
+
+#[cfg(test)]
+mod mqtt_tests {
+    use crate::{Transport};
+    use crate::mqtt::MqttTransport;
+
+    #[test]
+    fn test_mqtt_not_implemented() {
+        let mut mqtt = MqttTransport::new("broker.mqtt.com", 1883);
+        assert!(!mqtt.is_active());
+        assert_eq!(mqtt.descriptor().kind, "mqtt");
+        assert_eq!(mqtt.descriptor().address, "broker.mqtt.com:1883");
+        assert!(mqtt.open().is_err());
+        assert!(mqtt.write(b"test").is_err());
+        let mut buf = [0u8; 64];
+        assert!(mqtt.read(&mut buf).is_err());
+    }
+}
+
+#[cfg(test)]
+mod config_tests {
+    use crate::TransportConfig;
+
+    #[test]
+    fn test_config_serial_roundtrip() {
+        let config = TransportConfig::Serial {
+            port: "COM3".to_string(), baud_rate: 115200,
+            data_bits: 8, stop_bits: 1, parity: "None".to_string(),
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let back: TransportConfig = serde_json::from_str(&json).unwrap();
+        match back {
+            TransportConfig::Serial { port, baud_rate, .. } => {
+                assert_eq!(port, "COM3");
+                assert_eq!(baud_rate, 115200);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_config_tcp_roundtrip() {
+        let config = TransportConfig::TcpClient { host: "10.0.0.1".to_string(), port: 5000 };
+        let json = serde_json::to_string(&config).unwrap();
+        let back: TransportConfig = serde_json::from_str(&json).unwrap();
+        match back {
+            TransportConfig::TcpClient { host, port } => {
+                assert_eq!(host, "10.0.0.1");
+                assert_eq!(port, 5000);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
 }
