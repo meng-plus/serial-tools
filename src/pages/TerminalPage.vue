@@ -26,7 +26,6 @@
         <a-select v-model:value="terminalStore.encoding" style="width: 120px" size="middle">
           <a-select-option value="utf-8">显示 UTF-8</a-select-option>
           <a-select-option value="gbk">显示 GBK</a-select-option>
-          <a-select-option value="gb2312">显示 GB2312</a-select-option>
           <a-select-option value="hex">显示 HEX</a-select-option>
         </a-select>
 
@@ -82,7 +81,6 @@
       <a-select v-model:value="sendFormat" style="width: 110px" :disabled="!selectedChannel">
         <a-select-option value="utf-8">UTF-8</a-select-option>
         <a-select-option value="gbk">GBK</a-select-option>
-        <a-select-option value="gb2312">GB2312</a-select-option>
         <a-select-option value="hex">HEX</a-select-option>
       </a-select>
 
@@ -132,7 +130,7 @@ const connectionStore = useConnectionStore()
 const terminalStore = useTerminalStore()
 
 const terminalRef = ref<HTMLElement>()
-const sendFormat = ref<'utf-8' | 'gbk' | 'gb2312' | 'hex'>('utf-8')
+const sendFormat = ref<'utf-8' | 'gbk' | 'hex'>('utf-8')
 const sendPayload = ref('')
 const sendSuffix = ref('none')
 const autoScroll = ref(true)

@@ -104,19 +104,16 @@
 ```
 DataBus {
     id, name,
-    subscriptions: Vec<BusSubscription>,  // 订阅列表
-    bus_tx: broadcast::Sender<Vec<u8>>,   // 内部广播通道
+    subscriptions: Vec<BusSubscription>,
+    bus_tx: broadcast::Sender<Vec<u8>>,
     cancel, threads, rx_bytes, tx_bytes,
 }
 
-BusSubscription {
-    channel_id: String,
-    direction: BusDirection,  // RxToBus | TxFromBus | Both
-}
+BusSubscription { channel_id, direction: RxToBus | TxFromBus | Both }
 ```
 
 **订阅方向语义**:
-- `RxToBus`: 通道读线程读取 RX → 发送到 `bus_tx` 广播
+- `RxToBus`: **订阅** `AppState.rx_broadcast`，按 channel_id 过滤后写入 `bus_tx`（禁止再 `transport.read`，避免双读者）
 - `TxFromBus`: 订阅 `bus_tx` → 写入通道 TX
 - `Both`: 同时执行上述两个方向
 
@@ -127,72 +124,65 @@ BusSubscription {
 - 监听: A(RxToBus) — 仅抓包不转发
 
 **线程模型**:
-- 每个 RxToBus 订阅启动 1 个读线程（从通道读 → 推入 bus）
-- 每个 TxFromBus 订阅启动 1 个写线程（从 bus 收 → 写入通道）
-- 所有线程共享 `cancel` 标志，停止时 `join()` 等待退出
+- 每个 RxToBus：1 个订阅 `rx_broadcast` 的转发线程
+- 每个 TxFromBus：1 个写线程（从 bus 收 → 写入通道）
+- 共享 `cancel` / 子订阅 cancel，停止时 join
 
 **替代方案（已排除）**:
-- 保留点对点转发器 + 新增广播功能：两套代码维护成本高
-- 全局事件总线（所有数据流经同一条总线）：无法隔离不同转发场景
+- 保留点对点转发器 + 新增广播：两套代码
+- 全局单总线：无法隔离场景
 
-## 10. 前端事件驱动 + 轮询兜底
+## 10. 前端事件驱动（轮询仅兜底）
 
-**决策**: 前端优先使用 Tauri 事件监听，增加 500ms 轮询作为兜底。
+**决策**: 终端 **正常只订阅** `rx-data`；仅事件订阅失败时启用轮询。
 
-**理由**:
-- Tauri 事件驱动是理想路径（零延迟、低开销）
-- 浏览器预览模式无法使用 Tauri 事件，轮询保证功能可用
-- 事件监听和轮询通过时间戳去重，避免重复显示
-- 500ms 间隔对调试场景足够，不会造成明显 CPU 开销
+**实现要点**:
+- 启动可一次性 `get_packets` 拉历史
+- 去重优先 `seq`，其次内容指纹 `direction|channelId|timestamp|hex`
+- TX 仅用 `send_data` 回包入账，避免本地与轮询双记
+- 浏览器预览无 Tauri 事件时走轮询兜底（约 400ms）
 
-## 11. 数据包缓冲 + 时间戳
+**已废弃**: 「始终 500ms 轮询 + 仅时间戳去重」方案（易导致双条显示）。
 
-**决策**: 每个数据包附带毫秒级时间戳，存入共享缓冲区。
+## 11. 数据包缓冲 + 序号
 
-**理由**:
-- 调试场景需要知道数据到达的精确时间
-- 缓冲区上限 10000 条，超出淘汰旧数据
-- 时间戳在读线程中生成（`chrono::Local`），保证精度
-
-## 12. 编码切换在前端处理
-
-**决策**: UTF8/GBK/HEX 编码切换在前端完成，后端只传原始字节。发送端同样支持编码选择。
+**决策**: 每包附毫秒时间戳 + 单调 `seq`，缓冲上限 10000。
 
 **理由**:
-- 原始字节是通用格式，编码是展示层逻辑
-- 前端切换无需请求后端
-- HEX 发送模式由前端解析 hex 字符串后调用 `send_data(format='hex')`
-- 减少后端复杂度
+- `seq` 供事件/历史/回包统一去重
+- 时间戳用于展示与内容指纹辅助键
+
+## 12. 编码：显示前端、GBK 发送后端
+
+**决策**:
+- 展示：UTF-8 / GBK / HEX 在前端切换（依赖保留的原始字节）
+- 发送：UTF-8/`text`、HEX 前端组包；**GBK 由后端 `encoding_rs` 编码**
+- UI 不再提供 GB2312（其为 GBK 子集）
 
 ## 13. Tauri v2 事件桥接（event_bridge）
 
-**决策**: 新增 `event_bridge.rs`，订阅内部 `tokio::sync::broadcast` 频道，通过 `tauri::Emitter::emit()` 推送给前端。RX 数据以 hex 字符串传输，避免 `Vec<u8>` 序列化歧义。
+**决策**: `event_bridge.rs` 将内部 broadcast 转为 Tauri emit；RX 用 hex 传字节。
 
-**理由**:
-- 后端 `rx_broadcast` 和 `log_broadcast` 是 Rust 内部频道，不能直接序列化给前端
-- `Vec<u8>` 在 Tauri IPC 中的序列化行为不确定（可能变为 typed array），改用 hex 字符串更可靠
-- 前端通过 `hexToBytes()` 从 hex 字符串还原原始字节
-
-**关键类型**:
-- `RxEventPayload` — RX 数据事件（channel_id, bytes_hex, hex, text, timestamp）
-- `ConnectionEventPayload` — 连接状态变更（channel_id, connected, transport_type, port_name）
-- `LogEntry`（直接序列化）— 日志事件
+**关键载荷**:
+- `RxEventPayload` — channel_id, bytes_hex, hex, text, timestamp, **seq**
+- `ConnectionEventPayload` — channel_id, connected, transport_type, port_name,
+  parent_channel_id, **server_clients**, **reason** (`local`|`remote`|`error`)
+- `LogEntry` — 日志
 
 ## 14. Tauri v2 环境检测
 
 **决策**: 使用 `__TAURI_INTERNALS__` 而非 `__TAURI__` 检测 Tauri 环境。
 
-**理由**:
-- Tauri v2 默认不注入 `window.__TAURI__` 全局对象（Tauri v1 行为）
-- `window.__TAURI_INTERNALS__` 在 Tauri v2 中始终可用
-- 使用 `__TAURI__` 会导致前端误判为浏览器模式，所有 IPC 调用失败
-
 ## 15. TCP Server 客户端 descriptor 标记
 
-**决策**: `TcpClientTransport::from_stream()` 创建的传输，descriptor.kind 标记为 `"tcp_server_client"` 而非 `"tcp_client"`。
+**决策**: `from_stream` 的 descriptor.kind = `"tcp_server_client"`。
 
-**理由**:
-- 前端需要区分「独立连接的 TCP 客户端」和「TCP Server 接受的子客户端」
-- `get_connection_status` 返回的 transport_type 直接来自 descriptor.kind
-- 前端 ConnectionPage 根据类型决定显示样式（客户端数量、缩进列表等）
-- 终端页面根据类型决定过滤逻辑（选中 server 时包含所有 client 数据）
+## 16. 主动断开 vs 异常断开
+
+**决策**: 主动踢人/关连接必须 `Shutdown::Both` 发 FIN；读侧区分 `remote`(FIN) 与 `error`(RST)。
+
+**理由**: 粗暴 drop 易导致对端提示「服务异常」；与 sscom 等工具的「已断开」体验对齐。
+
+## 17. 应用内右键菜单
+
+**决策**: 全局拦截 WebView 浏览器右键，提供调试相关动作（复制日志、清屏、剪切粘贴、刷新连接等）。

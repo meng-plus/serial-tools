@@ -15,7 +15,7 @@ export interface TerminalLine {
   seq?: number
 }
 
-export type Encoding = 'utf-8' | 'gbk' | 'gb2312' | 'hex'
+export type Encoding = 'utf-8' | 'gbk' | 'hex'
 
 export interface DisplayConfig {
   showTimestamp: boolean
@@ -242,17 +242,10 @@ export const useTerminalStore = defineStore('terminal', () => {
       case 'hex':
         return line.hex.replace(/(.{2})/g, '$1 ').trim()
       case 'gbk':
-      case 'gb2312':
         try {
-          const bytes = new Uint8Array(line.rawBytes)
-          const label = encoding.value === 'gb2312' ? 'gb2312' : 'gbk'
-          return new TextDecoder(label).decode(bytes)
+          return new TextDecoder('gbk').decode(new Uint8Array(line.rawBytes))
         } catch {
-          try {
-            return new TextDecoder('gbk').decode(new Uint8Array(line.rawBytes))
-          } catch {
-            return line.text
-          }
+          return line.text
         }
       case 'utf-8':
       default:
@@ -261,8 +254,8 @@ export const useTerminalStore = defineStore('terminal', () => {
   }
 
   async function sendText(channelId: string, text: string, suffix: string = 'none', sendEncoding?: Encoding) {
-    const format = sendEncoding === 'gbk' || sendEncoding === 'gb2312'
-      ? sendEncoding
+    const format = sendEncoding === 'gbk'
+      ? 'gbk'
       : sendEncoding === 'hex'
         ? 'hex'
         : 'text'

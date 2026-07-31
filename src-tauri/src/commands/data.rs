@@ -7,7 +7,7 @@ use tauri::State;
 pub struct SendDataRequest {
     pub channel_id: String,
     pub data: String,
-    /// text / hex / gbk / gb2312
+    /// text / hex / gbk
     pub format: String,
     pub suffix: Option<String>, // none / cr / lf / crlf
 }
@@ -76,8 +76,8 @@ pub async fn send_data(
             raw = append_suffix(raw, request.suffix.as_deref());
             raw
         }
+        // 兼容旧客户端：GB2312 是 GBK 子集，统一按 GBK 发送
         "gb2312" => {
-            // GB2312 是 GBK 子集；encoding_rs 无独立 GB2312，用 GBK 编码并校验可表示性
             let mut raw = encode_chinese(&request.data, encoding_rs::GBK)?;
             raw = append_suffix(raw, request.suffix.as_deref());
             raw

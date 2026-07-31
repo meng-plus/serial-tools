@@ -7,8 +7,7 @@
             <a-form-item label="终端编码">
               <a-select v-model:value="settings.encoding" style="width: 200px">
                 <a-select-option value="utf-8">UTF-8</a-select-option>
-                <a-select-option value="gbk">GBK</a-select-option>
-                <a-select-option value="gb2312">GB2312</a-select-option>
+                <a-select-option value="gbk">GBK（含 GB2312）</a-select-option>
                 <a-select-option value="hex">HEX</a-select-option>
               </a-select>
             </a-form-item>
@@ -83,7 +82,7 @@ const saveName = ref('')
 const baudRates = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
 
 const settings = reactive({
-  encoding: 'utf-8' as 'utf-8' | 'gbk' | 'gb2312' | 'hex',
+  encoding: 'utf-8' as 'utf-8' | 'gbk' | 'hex',
   maxLines: 10000,
   defaultSuffix: 'none',
   defaultBaudRate: 115200,
@@ -121,6 +120,7 @@ async function handleLoadSession(name: string) {
     const data = JSON.parse(content)
     if (data.settings) {
       Object.assign(settings, data.settings)
+      if ((settings.encoding as string) === 'gb2312') settings.encoding = 'gbk'
       terminalStore.encoding = settings.encoding
       terminalStore.maxLines = settings.maxLines
     }
@@ -133,7 +133,17 @@ async function handleLoadSession(name: string) {
 onMounted(async () => {
   const saved = localStorage.getItem('serial-tools-settings')
   if (saved) {
-    try { Object.assign(settings, JSON.parse(saved)) } catch { /* ignore */ }
+    try {
+      const parsed = JSON.parse(saved)
+      Object.assign(settings, parsed)
+      // GBK 已覆盖 GB2312，迁移旧设置
+      if ((settings.encoding as string) === 'gb2312') {
+        settings.encoding = 'gbk'
+      }
+    } catch { /* ignore */ }
+  }
+  if ((terminalStore.encoding as string) === 'gb2312') {
+    terminalStore.encoding = 'gbk'
   }
   await sessionStore.loadList()
 })

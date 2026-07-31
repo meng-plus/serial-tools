@@ -4,11 +4,11 @@
 
 ## 功能
 
-- **多协议连接**：UART（含 RS485 半双工）/ TCP Client / TCP Server / MQTT（计划中）
-- **数据终端**：XShell 风格，支持 UTF-8 / GBK / HEX 实时切换
-- **端口转发**：任意通道间桥接，单向 / 双向，多规则并行
-- **协议解析**：Modbus RTU/TCP、JSON 字段提取、正则匹配（计划中）
-- **日志录制**：BIN / CSV / HEX 多格式（计划中）
+- **多协议连接**：UART（含 RS485 半双工标记）/ TCP Client / TCP Server；MQTT / UDP（计划中）
+- **数据终端**：XShell 风格，UTF-8 / GBK / HEX；事件驱动收包
+- **端口转发**：数据总线模型，点对点 / 广播 / 双向
+- **协议解析**：界面已有，解析管线计划中
+- **系统日志**：内存日志流；BIN/CSV 导出计划中
 - **会话管理**：YAML 配置保存 / 加载
 
 ## 技术栈
@@ -121,11 +121,11 @@ serial-tools/
 
 核心设计：
 - **Transport trait**：统一传输层接口，上层不关心底层类型
-- **broadcast 广播**：RX 数据通过 `tokio::sync::broadcast` 多订阅者分发
-- **独立读线程**：每个通道 `std::thread` 同步阻塞读取，不阻塞 tokio runtime
-- **事件驱动前端**：Tauri `listen()` 推送，零轮询
+- **broadcast 广播**：RX 经 `rx_broadcast` 多订阅者分发
+- **独立读线程**：每通道 `std::thread` 同步阻塞读
+- **事件驱动前端**：`rx-data` / `connection-changed`；终端默认不轮询
 
-详细架构文档见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+详细架构见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)，路线图见 [docs/ROADMAP.md](docs/ROADMAP.md)。
 
 ## 测试
 
@@ -147,9 +147,10 @@ cargo test --test integration_tests
 
 | 文档 | 说明 |
 |------|------|
-| [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) | 跨平台环境搭建指南 |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 系统架构详解 |
-| [docs/DESIGN-DECISIONS.md](docs/DESIGN-DECISIONS.md) | 设计决策记录 |
+| [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) | 跨平台环境搭建 |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构真相与规范 |
+| [docs/DESIGN-DECISIONS.md](docs/DESIGN-DECISIONS.md) | 设计决策 |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | 后续优先级 |
 | [docs/requirements.md](docs/requirements.md) | 需求文档 |
 
 ## 许可证

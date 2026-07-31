@@ -280,11 +280,15 @@ pub trait Framer {
 
 ### Phase 2: 统一管理器
 - [x] 行为层：TCP Server 每客户端独立通道 + kick/list/send
+- [x] 事件：`connection-changed`（含 server_clients / reason）+ `rx-data`（含 seq）
 - [ ] 独立 `TransportManager` / `ChannelManager` crate（延后，现用 AppState）
 
 ### Phase 3: 多路复用基础
 - [x] 简单 Framer（超时/定界符，见 `crates/transport/src/framer.rs`）
+- [ ] Framer 接入读路径 / 协议解析管线
 - [ ] `ProtocolChannel` 抽象（未实现）
+
+> **落地约束**：当前实现为 **sync Transport + std::thread**，不以孤立提交的 async 重写为准。详见 ARCHITECTURE.md / DESIGN-DECISIONS.md / ROADMAP.md。
 
 ### 已落地的关键行为（相对孤立提交）
 

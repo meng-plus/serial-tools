@@ -1,401 +1,199 @@
 # Serial Tools 架构文档
 
-> 基于实际代码，2026-07-31 更新
+> 基于实际代码校对，2026-07-31（v0.1.0 基线）
+> 配套：[DESIGN-DECISIONS.md](./DESIGN-DECISIONS.md) · [ROADMAP.md](./ROADMAP.md) · [COMMUNICATION-ARCH-REFINEMENT.md](./COMMUNICATION-ARCH-REFINEMENT.md)
 
-## 整体架构
+## 0. 能力基线（已实现 / 计划中）
+
+| 能力 | 状态 | 说明 |
+|------|------|------|
+| UART / RS485 半双工标记 | ✅ | `DuplexMode::Half`；无软件 DE/RTS |
+| TCP Client（3s 连接超时） | ✅ | |
+| TCP Server 多客户端 | ✅ | 每客户端独立 `tcp_client-{addr}` 通道 |
+| 踢客户端 / 列表 / 事件刷新 | ✅ | `disconnect_client` + `server_clients` |
+| 终端 RX/TX | ✅ | **事件驱动** `rx-data`；TX 用 `send_data` 回包 |
+| 编码 UTF-8 / GBK / HEX | ✅ | 显示前端；GBK 发送走 `encoding_rs` |
+| 数据总线转发 | ✅ | RxToBus 订 `rx_broadcast`，不抢读 |
+| 断开原因 local/remote/error | ✅ | 优雅 FIN vs RST |
+| 自定义右键菜单 | ✅ | 替代浏览器默认菜单 |
+| MQTT | ⏳ 占位 | `mqtt.rs` stub，无 UI |
+| UDP | ❌ 未实现 | 勿写成已交付 |
+| 协议解析管线 | ⏳ UI 壳 | 后端 `protocol.rs` 仍返回空 |
+| Framer 接线 | ⏳ 库内有 | `framer.rs` 未接入业务 |
+| 日志 BIN/CSV/HEX 导出 | ❌ 未实现 | 仅内存系统日志 |
+| ChannelManager crate | 🔮 延后 | 现用 `AppState` |
+
+---
+
+## 1. 整体架构
 
 ```
 ┌──────────────────────────────────────────────────────────┐
 │                   前端 (Vue 3 + TypeScript)               │
-│                                                          │
-│  ┌──────────────┐ ┌──────────────┐ ┌──────────────────┐  │
-│  │ConnectionPage│ │ TerminalPage │ │  ForwardPage     │  │
-│  │ 连接管理      │ │ 数据终端      │ │  转发管理        │  │
-│  └──────┬───────┘ └──────┬───────┘ └────────┬─────────┘  │
-│  ┌──────┴───────┐ ┌──────┴───────┐ ┌────────┴─────────┐  │
-│  │ ProtocolPage │ │   LogPage    │ │  SettingsPage    │  │
-│  │ 协议解析      │ │  日志管理     │ │  全局设置        │  │
-│  └──────┬───────┘ └──────┬───────┘ └────────┬─────────┘  │
-│         └────────────────┼──────────────────┘            │
-│                          ▼                               │
-│                   Pinia Stores                           │
-│        (connectionStore / sessionStore / logStore)        │
+│  Connection / Terminal / Forward / Protocol / Log / …    │
+│  Pinia: connectionStore · terminalStore · logStore · …   │
+│  自定义 AppContextMenu（屏蔽 WebView 浏览器右键）          │
 └──────────────────────┬───────────────────────────────────┘
-                       │ Tauri IPC (invoke / listen)
+                       │ invoke / listen
 ┌──────────────────────┴───────────────────────────────────┐
 │                 后端 (Rust + Tauri v2)                    │
-│                                                          │
-│  ┌───────────────────────────────────────────────────┐   │
-│  │              Commands Layer                        │   │
-│  │  connection │ data │ forward │ protocol │ log │ cfg│   │
-│  └─────────────────────┬─────────────────────────────┘   │
-│                        ▼                                 │
-│  ┌───────────────────────────────────────────────────┐   │
-│  │              State (AppState)                      │   │
-│  │  channels / buses / packets / rx_broadcast    │   │
-│  │  每个通道 = 1 独立读线程 + broadcast 事件广播        │   │
-│  └─────────────────────┬─────────────────────────────┘   │
-│                        ▼                                 │
-│  ┌───────────────────────────────────────────────────┐   │
-│  │          Transport Layer (trait)                    │   │
-│  │  Serial │ TCP Client │ TCP Server │ MQTT │ Mock     │   │
-│  │  统一 read/write/close 接口                         │   │
-│  └───────────────────────────────────────────────────┘   │
+│  Commands: connection · data · forward · protocol · …    │
+│  AppState: channels · tcp_servers · buses · packets      │
+│            rx_broadcast · log_broadcast · packet_seq     │
+│  event_bridge: rx_broadcast → emit("rx-data")            │
+│                log_broadcast → emit("log-entry")         │
+│  Transport: Serial │ TCP Client │ TCP Server │ MQTT stub │
 └──────────────────────────────────────────────────────────┘
 ```
 
-## Crate 结构
+### 真实数据路径
+
+```
+spawn_reader / Server 子通道读线程
+  → PacketEntry{seq} 入 packets
+  → rx_broadcast.send(RxBroadcastEvent{seq})
+       ├─ event_bridge → 前端 terminalStore（主路径）
+       └─ DataBus RxToBus → bus_tx → TxFromBus → write
+
+send_data
+  → Transport.write
+  → PacketEntry{seq} 入 packets
+  → 回包给前端入账 TX（不再依赖轮询）
+```
+
+---
+
+## 2. Crate / 目录
 
 ```
 serial-tools/
-├── crates/
-│   └── transport/          # 传输层 trait + 实现
-│       └── src/
-│           ├── lib.rs       # Transport trait 定义
-│           ├── serial.rs    # UART/RS485 (serialport crate)
-│           ├── tcp.rs       # TCP Client (std::net::TcpStream)
-│           ├── mqtt.rs      # MQTT (占位，未实现)
-│           └── mock.rs      # Mock 传输（测试用）
-├── src-tauri/
-│   └── src/
-│       ├── lib.rs           # Tauri 入口 + 命令注册
-│       ├── state.rs         # AppState 全局状态管理
-│       ├── main.rs
-│       └── commands/        # Tauri 命令层
-│           ├── mod.rs
-│           ├── connection.rs  # 连接管理
-│           ├── data.rs        # 数据收发
-│           ├── forward.rs     # 数据总线
-│           ├── protocol.rs    # 协议解析
-│           ├── log.rs         # 日志
-│           └── config.rs      # 配置管理
-├── src/                     # Vue 3 前端
-│   ├── pages/               # 6 个页面
-│   ├── stores/              # Pinia 状态管理
-│   ├── api/                 # Tauri IPC 封装
-│   └── App.vue
-├── docs/                    # 设计文档
-│   ├── ARCHITECTURE.md      # 本文档
-│   ├── DESIGN-DECISIONS.md  # 设计决策
-│   └── requirements.md      # 需求文档
-└── tests/                   # 集成测试
+├── crates/transport/     # 唯一独立业务 crate
+│   └── serial / tcp / mqtt(stub) / mock / framer
+├── src-tauri/src/
+│   ├── state.rs          # AppState + DataBus + spawn_reader
+│   ├── event_bridge.rs
+│   └── commands/
+├── src/                  # Vue
+│   ├── pages / stores / api / components / router
+└── docs/
 ```
 
-**当前实际 crate**：仅 `transport`（独立 crate），其余逻辑在 `src-tauri` 中。
+**规范**：不提前拆 `channel` / `protocol` crate；稳定后再拆（见 DESIGN-DECISIONS §2）。
 
-## Transport Trait
+---
 
-所有传输层实现统一的 `Transport` trait，sync 阻塞设计（配合独立读线程）：
+## 3. Transport 层
 
 ```rust
 pub trait Transport: Send + Sync {
     fn open(&mut self) -> Result<(), TransportError>;
     fn close(&mut self) -> Result<(), TransportError>;
+    fn shutdown(&self) -> Result<(), TransportError>; // 主动关：发 FIN
     fn write(&self, bytes: &[u8]) -> Result<usize, TransportError>;
     fn read(&self, buf: &mut [u8]) -> Result<usize, TransportError>;
     fn is_active(&self) -> bool;
     fn descriptor(&self) -> &TransportDescriptor;
+    fn duplex_mode(&self) -> DuplexMode; // 默认 Full；Serial 半双工 → Half
 }
 ```
 
-### 实现列表
-
-| 类型 | 类名 | 文件 | 说明 |
-|------|------|------|------|
-| Serial | `SerialTransport` | `serial.rs` | 基于 `serialport` crate，同步阻塞读写 |
-| TCP Client | `TcpClientTransport` | `tcp.rs` | `std::net::TcpStream`，同步阻塞 |
-| MQTT | `MqttTransport` | `mqtt.rs` | 占位，`open()` 返回未实现错误 |
-| Mock | `MockTransport` | `mock.rs` | 内存模拟，测试用 |
-
-### TransportConfig
-
-```rust
-pub enum TransportConfig {
-    Serial { port, baud_rate, data_bits, stop_bits, parity },
-    TcpClient { host, port },
-    TcpServer { bind_addr, port },
-    Mqtt { broker, port, client_id, topics },
-}
-```
-
-## 数据流
-
-### RX 路径（接收）
-
-```
-独立读线程 (std::thread)
-  │
-  ├── Transport.read(buf)          # 同步阻塞读取
-  │
-  ├── 构造 PacketEntry             # 时间戳 + hex + text + direction
-  │
-  ├── AppState.packets.push()      # 存入共享缓冲区（上限 10000 条）
-  │
-  └── AppState.rx_broadcast.send() # 广播 RxBroadcastEvent
-        │
-        ├── 前端 sessionStore       # Tauri listen → 更新 UI
-        │
-        └── Forwarder 线程          # 订阅 → 转发到目标通道
-```
-
-### TX 路径（发送）
-
-```
-前端输入 → Tauri invoke(data::send)
-  │
-  └── AppState.send_to_channel(channel_id, bytes)
-        │
-        └── Transport.write(bytes)  # 同步写入
-```
-
-### 广播事件
-
-```rust
-pub struct RxBroadcastEvent {
-    pub channel_id: String,
-    pub bytes: Vec<u8>,
-    pub timestamp: String,
-}
-```
-
-`broadcast::channel(1024)` 支持多个订阅者（终端 + 转发器同时监听）。
-
-## 通信框架核心抽象：Transport → Channel → Duplex
-
-通信层采用三层抽象，自底向上：
-
-```
-┌─────────────────────────────────────────────────────┐
-│  Transport（物理连接）                                │
-│  负责底层 IO：打开端口、读写字节、管理连接               │
-│  一个 Transport 实例 = 一个物理连接                     │
-├─────────────────────────────────────────────────────┤
-│  Channel（逻辑通道）                                  │
-│  封装 Duplex 控制、广播数据事件、统计信息               │
-│  一个 Transport 可创建 1~N 个 Channel                  │
-├─────────────────────────────────────────────────────┤
-│  DuplexMode（双工模式）                               │
-│  Full / Half / SimplexTx / SimplexRx                 │
-│  控制通道的收发行为                                    │
-└─────────────────────────────────────────────────────┘
-```
-
-### DuplexMode 枚举
-
-```rust
-pub enum DuplexMode {
-    Full,       // 全双工：TX/RX 独立并行（UART 全双工、TCP）
-    Half,       // 半双工：TX/RX 互斥（RS485 单总线）
-    SimplexTx,  // 只发送
-    SimplexRx,  // 只接收
-}
-```
-
-### Transport 与 Channel 的映射关系
-
-| Transport 类型 | 线程模型 | Channel 数量 | 说明 |
-|---------------|---------|-------------|------|
-| **UART** | 1 线程 | **1 个** | 独占串口，1 线程 = 1 Channel |
-| **TCP Client** | 1 线程 | **1 个** | 单连接 |
-| **TCP Server** | 1 监听 + N 线程 | **N 个** | 每客户端 = 1 Channel（独立线程） |
-| **UDP** | 1 线程 | **1 个** | 单 socket |
-
-### 关键设计原则
-
-**1 Transport 可创建多个 Channel**
-
-```
-TCP Server Transport:
-  ├── 接受客户端 A → 创建 Channel-A (thread-A)
-  ├── 接受客户端 B → 创建 Channel-B (thread-B)
-  └── 接受客户端 C → 创建 Channel-C (thread-C)
-
-UART Transport:
-  └── 打开串口 → 创建 Channel-0 (thread-0)
-       未来协议分包扩展：
-       └── 基于 Channel-0 创建 Protocol-Ch1, Protocol-Ch2 ...
-```
-
-**Channel 区分 Duplex 模式**
-
-```
-Channel-A: DuplexMode::Full    (TCP，全双工)
-Channel-B: DuplexMode::Half    (RS485，半双工)
-Channel-C: DuplexMode::SimplexRx (只读监控)
-```
-
-半双工控制逻辑（在 Channel 层）：
-- TX 发送前检查 `receiving` 标志
-- RX 接收期间设置 `receiving = true`
-- TX 等待 RX 空闲后发送
-
-**未来扩展：协议分包创建多 Channel**
-
-```
-UART Transport (1 物理连接)
-  └── Channel-0 (物理通道，全双工)
-       ├── Protocol-Ch1: Modbus RTU (DuplexMode::Half)
-       ├── Protocol-Ch2: 自定义协议 (DuplexMode::Full)
-       └── Protocol-Ch3: 原始数据 (DuplexMode::Full)
-```
-
-每个协议 Channel 独立广播自己的解码数据，上层 UI 可同时查看多个协议。
-
-### 当前实现状态
-
-| 功能 | 状态 | 说明 |
+| 类型 | kind | 说明 |
 |------|------|------|
-| Transport trait | ✅ 已实现 | read/write/sync 阻塞 |
-| DuplexMode 枚举 | ✅ 已设计 | Full/Half/SimplexTx/SimplexRx |
-| UART 1:1 Channel | ✅ 已实现 | 每通道独立读线程 |
-| TCP Server 1:N Channel | ⏳ 预留 | TransportConfig::TcpServer 已定义 |
-| RS485 半双工互斥 | ⏳ 待实现 | 需 receiving 标志 |
-| 协议分包多 Channel | 🔮 远期 | 基于 Channel + Framer 扩展 |
+| Serial | `serial` | serialport，可选 half_duplex |
+| TCP Client | `tcp_client` | connect_timeout 3s |
+| TCP Server 子客户端 | `tcp_server_client` | `from_stream` |
+| TCP Server | `tcp_server` | 监听 + `new_clients`；自身不 spawn_reader |
+| MQTT | `mqtt` | 占位 |
 
-## 通道模型
+**TCP Server 规范**：
+1. 单读者：子客户端流独占读，Server 不 pending 双读  
+2. 踢人 / 关服：先 `Shutdown::Both`（FIN），避免对端「服务异常」  
+3. 事件：`connection-changed` 携带 `parent_channel_id`、`server_clients`、`reason`
 
-### 每个通道的生命周期
+---
 
-```
-1. connection::open()
-   └── 创建 Transport（Serial/TcpClient）
-   └── 插入 AppState.channels
-
-2. state::spawn_reader(channel_id, transport)
-   └── 创建 cancel 标志
-   └── 启动 std::thread 读循环
-   └── 读取 → packets + broadcast
-
-3. data::send(channel_id, bytes)
-   └── Transport.write(bytes)
-
-4. connection::close(channel_id)
-   └── cancel.store(true)
-   └── 等待读线程退出
-   └── 从 channels 移除
-```
-
-### RS485 半双工
-
-当前实现：**硬件层面**不控制 DE/RTS，程序层面**不区分半双工和全双工**。
-读线程阻塞读取，写入直接调用 `Transport.write()`。
-未来如需半双工互斥，需在 `SerialTransport` 中添加 `receiving` 标志。
-
-### TCP Server 多通道
-
-当前 `TcpClientTransport` 仅支持客户端模式。
-TCP Server 功能在 `TransportConfig::TcpServer` 中有配置，但 `TcpServerTransport` 尚未实现。
-预期模型：1 监听线程 + N 客户端读线程，每个客户端一个 channel_id。
-
-## 数据总线模型
+## 4. AppState / 通道生命周期
 
 ```
-AppState.buses: HashMap<String, DataBus>
+connect → 创建 Transport → insert channels
+       → spawn_reader（TCP Server 除外）
+       → emit connected
 
-DataBus {
-    id, name,
-    subscriptions: Vec<BusSubscription>,  // 订阅列表
-    bus_tx: broadcast::Sender<Vec<u8>>,   // 内部广播通道
-    cancel: Arc<AtomicBool>,
-    threads: Vec<JoinHandle>,
-    rx_bytes, tx_bytes,
-}
+remove_channel → cancel=true → shutdown 传输 → join 读线程(≤2s)
 
-BusSubscription {
-    channel_id: String,
-    direction: BusDirection,  // RxToBus | TxFromBus | Both
-}
+对端断开（读线程）:
+  Ok(0)           → reason=remote → 清理 + emit
+  fatal IO (RST)  → reason=error  → 清理 + emit
+本端 disconnect   → reason=local  → 前端按钮提示，读线程不重复 toast
 ```
 
-订阅方向：
-- `RxToBus`: 通道 RX → 总线广播
-- `TxFromBus`: 总线广播 → 通道 TX
-- `Both`: 双向
+命令名：`connect` / `disconnect` / `disconnect_client` / `disconnect_all`（非 open/close）。
 
-组合模式：
-- 点对点转发 = A(RxToBus) + B(TxFromBus)
-- 广播 = A(RxToBus) + B(TxFromBus) + C(TxFromBus)
-- 双向桥接 = A(Both) + B(Both)
+---
 
-## 前端架构
+## 5. 前端事件规范
 
-### 页面
+| 事件 | 消费者 | 说明 |
+|------|--------|------|
+| `rx-data` | terminalStore | 主路径；含 `seq` |
+| `connection-changed` | connectionStore | 含 `reason` / `server_clients` |
+| `log-entry` | logStore | |
 
-| 页面 | 文件 | 功能 |
-|------|------|------|
-| 连接管理 | `ConnectionPage.vue` | 创建/配置/连接通信通道 |
-| 数据终端 | `TerminalPage.vue` | ASCII/HEX 显示收发数据 |
-| 数据总线 | `ForwardPage.vue` | 创建总线、管理订阅、监控状态 |
-| 协议解析 | `ProtocolPage.vue` | Modbus/JSON/正则匹配 |
-| 日志管理 | `LogPage.vue` | 操作日志查看/导出 |
-| 设置 | `SettingsPage.vue` | 全局配置 |
+**终端规范**：
+- 正常情况 **禁止周期轮询**；仅 `onRxData` 失败时 400ms 兜底  
+- 去重：`seq` 优先，其次 `direction|channelId|timestamp|hex`  
+- 启动可一次性 `get_packets` 拉历史  
 
-### 数据更新模式
+---
 
-**观察者模式**：Tauri 事件驱动，非轮询。
-- 前端通过 `listen()` 订阅后端事件
-- 后端 `rx_broadcast.send()` 触发事件
-- 前端收到事件后更新 Pinia store → Vue 响应式渲染
+## 6. 数据总线
 
-### Pinia Stores
-
-| Store | 职责 |
-|-------|------|
-| `connectionStore` | 连接状态、端口列表、配置持久化 |
-| `sessionStore` | 数据包缓冲、发送历史 |
-| `logStore` | 操作日志 |
-
-## 配置格式
-
-### 会话配置 (YAML)
-
-```yaml
-connection:
-  type: serial          # serial | tcp_client | tcp_server | mqtt
-  port: COM3
-  baud_rate: 115200
-  data_bits: 8
-  stop_bits: 1
-  parity: none
-
-terminal:
-  encoding: utf-8       # utf-8 | gbk | hex
-  line_ending: crlf     # none | cr | lf | crlf
-  timestamp: true
-
-protocols:
-  - name: modbus-slave1
-    type: modbus_rtu
-    slave_id: 1
+```
+RxToBus / Both.rx  → 订阅 rx_broadcast（禁止 transport.read）
+TxFromBus / Both.tx → 订阅 bus_tx → write
 ```
 
-### 总线配置
+组合：点对点 / 广播 / 双向 / 仅监听。详见 DESIGN-DECISIONS §9。
 
-```yaml
-buses:
-  - name: 485-to-tcp
-    subscriptions:
-      - channel: serial-001
-        direction: rx_to_bus
-      - channel: tcp-001
-        direction: tx_from_bus
-  - name: broadcast-all
-    subscriptions:
-      - channel: serial-001
-        direction: rx_to_bus
-      - channel: tcp-001
-        direction: tx_from_bus
-      - channel: tcp-002
-        direction: tx_from_bus
-```
+---
 
-## 线程模型总结
+## 7. 编码
 
-| 组件 | 线程类型 | 数量 | 说明 |
-|------|---------|------|------|
-| Tauri 主线程 | 异步 | 1 | UI + IPC |
-| 读线程 | `std::thread`（同步阻塞） | N（每通道 1 个） | `Transport.read()` |
-| 总线线程 | `std::thread` | M（每订阅 1-2 个） | RxToBus 读 + TxFromBus 写 |
-| Tokio runtime | 异步 | 1 | 管理 async 任务 |
+| 方向 | UTF-8 | GBK | HEX |
+|------|-------|-----|-----|
+| 显示 | 事件 text / TextDecoder | TextDecoder('gbk') on rawBytes | hex 格式化 |
+| 发送 | `format=text` | `encoding_rs::GBK` | `format=hex` |
 
-**设计选择**：读线程使用 `std::thread` 而非 tokio spawn，因为 `Transport.read()` 是同步阻塞的（`serialport` 和 `std::net::TcpStream` 不支持 async）。
+GB2312：UI 已移除；后端若收到 `gb2312` 按 GBK 兼容处理。
+
+---
+
+## 8. Duplex / Channel 抽象（目标态 vs 现状）
+
+**现状**：逻辑 Channel ≈ `AppState.channels` 中的一项 + 读线程；无独立 `ChannelInstance` trait。
+
+**目标态**（REFINEMENT，未落地）：Transport → Channel → ProtocolChannel。
+
+半双工软件互斥（`receiving` 标志）：⏳ 未做，当前依赖硬件方向控制。
+
+---
+
+## 9. 通信安全与体验约定
+
+1. 主动断开必须优雅 FIN（`shutdown(Both)`）  
+2. 异常与主动断开提示分离（remote / error / local）  
+3. WebView 禁用浏览器默认右键，使用应用菜单  
+4. 产品文案勿宣称未实现能力（UDP / 日志导出 / 完整协议解析）
+
+---
+
+## 10. 相关文档索引
+
+| 文档 | 职责 |
+|------|------|
+| 本文 | 架构真相与规范 |
+| DESIGN-DECISIONS.md | 为何这样选 |
+| COMMUNICATION-ARCH-REFINEMENT.md | 演进路线（含未做项） |
+| ROADMAP.md | 下一步优先级 |
+| requirements.md | 需求（含计划项） |
+| tcp-server-bus-fix/* | 已完成专项验收 |

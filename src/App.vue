@@ -58,6 +58,7 @@
         </a-layout-footer>
       </a-layout>
     </a-layout>
+    <AppContextMenu />
   </a-config-provider>
 </template>
 
@@ -72,6 +73,7 @@ import {
 } from '@ant-design/icons-vue'
 import { useConnectionStore, useTerminalStore, useLogStore } from './stores'
 import { isTauri } from './api/tauri'
+import AppContextMenu from './components/AppContextMenu.vue'
 
 const isTauriEnv = isTauri()
 const router = useRouter()

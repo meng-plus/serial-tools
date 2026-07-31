@@ -1,6 +1,6 @@
 <template>
   <div class="about-page">
-    <a-card :bordered="false" class="about-card" size="small">
+    <a-card :bordered="false" class="about-card">
       <div class="about-header">
         <img src="/app-icon.png" alt="Serial Tools" class="app-logo" />
         <div class="header-text">
@@ -10,11 +10,11 @@
         </div>
       </div>
 
-      <a-divider class="tight-divider" />
+      <a-divider class="section-divider" />
 
       <div class="about-section">
         <h3>功能特性</h3>
-        <a-row :gutter="[12, 8]">
+        <a-row :gutter="[20, 16]">
           <a-col :span="12" v-for="feat in features" :key="feat.title">
             <div class="feature-item">
               <component :is="feat.icon" class="feat-icon" />
@@ -27,16 +27,16 @@
         </a-row>
       </div>
 
-      <a-divider class="tight-divider" />
+      <a-divider class="section-divider" />
 
       <div class="about-section">
         <h3>技术栈</h3>
-        <a-space wrap size="small">
+        <a-space wrap :size="[8, 8]">
           <a-tag v-for="tech in techStack" :key="tech" color="geekblue">{{ tech }}</a-tag>
         </a-space>
       </div>
 
-      <a-divider class="tight-divider" />
+      <a-divider class="section-divider" />
 
       <div class="about-section about-footer">
         <div class="author-info">
@@ -67,12 +67,12 @@ const QQ_GROUP_URI =
   `mqqapi://card/show_pslcard?src_type=internal&version=1&uin=${QQ_GROUP}&card_type=group&source=qrcode`
 
 const features = [
-  { title: '多协议支持', desc: 'UART / TCP / UDP / MQTT', icon: SwapOutlined },
-  { title: '数据终端', desc: 'XShell 风格，UTF-8/GBK/HEX 切换', icon: CodeOutlined },
-  { title: '端口转发', desc: '任意通道间桥接，单向/双向', icon: SwapOutlined },
-  { title: '协议解析', desc: 'Modbus RTU/TCP、JSON、正则', icon: BugOutlined },
-  { title: '日志录制', desc: 'BIN/CSV/HEX 多格式导出', icon: FileTextOutlined },
-  { title: '会话管理', desc: 'YAML 配置保存/加载', icon: HddOutlined },
+  { title: '多协议支持', desc: 'UART / TCP Client / TCP Server', icon: SwapOutlined },
+  { title: '数据终端', desc: '事件驱动，UTF-8 / GBK / HEX', icon: CodeOutlined },
+  { title: '端口转发', desc: '数据总线：点对点 / 广播 / 双向', icon: SwapOutlined },
+  { title: '协议解析', desc: '规则界面已就绪，管线推进中', icon: BugOutlined },
+  { title: '系统日志', desc: '分级日志流；导出能力规划中', icon: FileTextOutlined },
+  { title: '会话管理', desc: 'YAML 配置保存 / 加载', icon: HddOutlined },
 ]
 
 const techStack = [
@@ -111,86 +111,90 @@ async function joinQqGroup() {
 
 <style scoped>
 .about-page {
-  max-width: 640px;
+  max-width: 820px;
   margin: 0 auto;
 }
 .about-card {
-  border-radius: 8px;
+  border-radius: 12px;
 }
 .about-card :deep(.ant-card-body) {
-  padding: 16px 20px;
+  padding: 28px 32px;
 }
 .about-header {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
 }
 .app-logo {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
   flex-shrink: 0;
 }
 .header-text {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
 }
 .app-name {
-  font-size: 18px;
+  font-size: 24px;
   font-weight: 700;
   margin: 0;
   color: rgba(0, 0, 0, 0.88);
 }
 .app-desc {
   color: rgba(0, 0, 0, 0.45);
-  font-size: 13px;
+  font-size: 15px;
 }
 .ver-tag {
   margin: 0;
+  font-size: 13px;
+  line-height: 22px;
+  padding: 0 10px;
 }
-.tight-divider {
-  margin: 12px 0;
+.section-divider {
+  margin: 20px 0;
 }
 .about-section h3 {
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 600;
-  margin: 0 0 8px;
+  margin: 0 0 14px;
   color: rgba(0, 0, 0, 0.88);
 }
 .feature-item {
   display: flex;
   align-items: flex-start;
-  gap: 6px;
+  gap: 10px;
 }
 .feat-icon {
-  font-size: 14px;
+  font-size: 18px;
   color: #1677ff;
   margin-top: 2px;
 }
 .feature-title {
   font-weight: 500;
-  font-size: 12px;
-  line-height: 1.3;
+  font-size: 14px;
+  line-height: 1.4;
 }
 .feature-desc {
   color: rgba(0, 0, 0, 0.45);
-  font-size: 11px;
-  line-height: 1.3;
+  font-size: 13px;
+  line-height: 1.4;
+  margin-top: 2px;
 }
 .about-footer {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 12px;
 }
 .author-info {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  font-size: 12px;
+  gap: 16px;
+  font-size: 14px;
   color: rgba(0, 0, 0, 0.65);
 }
 .author-info a {
@@ -201,7 +205,7 @@ async function joinQqGroup() {
   user-select: none;
 }
 .license-line {
-  font-size: 11px;
+  font-size: 13px;
   color: rgba(0, 0, 0, 0.45);
 }
 </style>

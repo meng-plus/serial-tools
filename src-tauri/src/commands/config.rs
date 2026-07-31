@@ -42,7 +42,7 @@ pub async fn save_session(
 
 #[tauri::command]
 pub async fn list_sessions(
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
 ) -> Result<Vec<SessionInfo>, String> {
     let dir = config_dir().join("sessions");
     if !dir.exists() {
