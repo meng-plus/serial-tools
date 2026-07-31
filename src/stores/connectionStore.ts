@@ -31,7 +31,7 @@ export const useConnectionStore = defineStore('connection', () => {
   )
 
   // 获取某个 TCP Server 的客户端通道
-  function getServerClients(serverChannelId: string): ChannelInfo[] {
+  function getServerClients(_serverChannelId: string): ChannelInfo[] {
     const prefix = 'tcp_client-'
     return Array.from(channels.value.values()).filter(
       c => c.transportType === 'tcp_server_client' && c.channelId.startsWith(prefix)

@@ -73,7 +73,7 @@
 import {
   ApiOutlined, UserOutlined, MailOutlined, LinkOutlined,
   SwapOutlined, CodeOutlined, FileTextOutlined, BugOutlined,
-  HddOutlined, DashboardOutlined,
+  HddOutlined,
 } from '@ant-design/icons-vue'
 
 const features = [
