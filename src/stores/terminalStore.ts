@@ -1,8 +1,9 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { invoke } from '@/api'
-import { onRxData, type RxEventPayload } from '@/api/events'
 import { useConnectionStore } from './connectionStore'
+import { useRxHub } from './rxHub'
+import type { RxRecord } from '@/protocol/types'
 
 export interface TerminalLine {
   id: number
@@ -33,18 +34,10 @@ interface SendResult {
   seq?: number
 }
 
-interface PacketRow {
-  timestamp: string
-  direction: string
-  channel_id: string
-  bytes: number[]
-  hex: string
-  text: string
-  seq?: number
-}
-
+/**
+ * 终端视图状态：展示与发送；RX 数据来自 rxHub，不再独自订 rx-data。
+ */
 export const useTerminalStore = defineStore('terminal', () => {
-  const lines = ref<TerminalLine[]>([])
   const encoding = ref<Encoding>('utf-8')
   const maxLines = ref(10000)
   const displayConfig = ref<DisplayConfig>({
@@ -53,14 +46,12 @@ export const useTerminalStore = defineStore('terminal', () => {
     showChannel: true,
   })
   let lineIdCounter = 0
-  let unlisten: (() => void) | null = null
-  /** seq 优先；无 seq 时用内容指纹 */
-  const seenKeys = new Set<string>()
-  const eventDriven = ref(false)
-  let pollTimer: ReturnType<typeof setInterval> | null = null
-  let initPromise: Promise<void> | null = null
+  let unsub: (() => void) | null = null
 
+  /** 工作区绑定的通道（一视图一通道；空=兼容旧页「全部」） */
   const activeChannelId = ref<string>('')
+
+  const lines = ref<TerminalLine[]>([])
 
   const filteredLines = computed(() => {
     if (!activeChannelId.value) return lines.value
@@ -74,9 +65,6 @@ export const useTerminalStore = defineStore('terminal', () => {
         l => l.channelId === selected || clientIds.has(l.channelId)
       )
     }
-    if (selected.startsWith('tcp_client-')) {
-      return lines.value.filter(l => l.channelId === selected)
-    }
     return lines.value.filter(l => l.channelId === selected)
   })
 
@@ -87,154 +75,45 @@ export const useTerminalStore = defineStore('terminal', () => {
     filteredLines.value.filter(l => l.direction === 'tx').length
   )
 
-  function contentKey(
-    direction: string,
-    channelId: string,
-    timestamp: string,
-    hex: string,
-  ) {
-    // 不含 text：避免 UTF-8 替换字符等导致事件/历史键不一致
-    return `${direction}|${channelId}|${timestamp}|${hex.toLowerCase()}`
-  }
+  const eventDriven = computed(() => useRxHub().eventDriven)
 
-  function addLine(
-    direction: 'rx' | 'tx',
-    channelId: string,
-    hex: string,
-    text: string,
-    rawBytes: number[],
-    timestamp?: string,
-    seq?: number
-  ) {
-    const ts = timestamp
-      || (new Date().toLocaleTimeString('en-US', { hour12: false })
-        + '.' + String(Date.now() % 1000).padStart(3, '0'))
-
-    const normalizedHex = (hex || '').toLowerCase()
-
-    if (seq != null && seq > 0) {
-      const skey = `seq:${seq}`
-      if (seenKeys.has(skey)) return
-      seenKeys.add(skey)
-    }
-
-    const ckey = contentKey(direction, channelId, ts, normalizedHex)
-    if (seenKeys.has(ckey)) return
-    seenKeys.add(ckey)
-
-    lines.value.push({
+  function recordToLine(r: RxRecord): TerminalLine {
+    return {
       id: ++lineIdCounter,
-      timestamp: ts,
-      direction,
-      channelId,
-      hex: normalizedHex,
-      text,
-      rawBytes,
-      seq,
-    })
+      timestamp: r.timestamp,
+      direction: r.direction,
+      channelId: r.channelId,
+      hex: r.hex,
+      text: r.text,
+      rawBytes: r.bytes,
+      seq: r.seq,
+    }
+  }
+
+  function onHubRecord(r: RxRecord) {
+    lines.value.push(recordToLine(r))
     if (lines.value.length > maxLines.value) {
-      const drop = lines.value.length - maxLines.value + 1000
-      const removed = lines.value.splice(0, drop)
-      for (const r of removed) {
-        seenKeys.delete(contentKey(r.direction, r.channelId, r.timestamp, r.hex))
-        if (r.seq != null && r.seq > 0) seenKeys.delete(`seq:${r.seq}`)
-      }
+      lines.value.splice(0, lines.value.length - maxLines.value + 1000)
     }
-  }
-
-  function ingestPacket(pkt: PacketRow) {
-    addLine(
-      pkt.direction as 'rx' | 'tx',
-      pkt.channel_id,
-      pkt.hex || '',
-      pkt.text || '',
-      pkt.bytes || hexToBytes(pkt.hex || ''),
-      pkt.timestamp,
-      pkt.seq && pkt.seq > 0 ? pkt.seq : undefined
-    )
-  }
-
-  async function loadHistory(limit = 500) {
-    try {
-      const result = await invoke<{ packets: PacketRow[]; total: number }>(
-        'get_packets',
-        { limit }
-      )
-      for (const pkt of [...result.packets].reverse()) {
-        ingestPacket(pkt)
-      }
-    } catch { /* ignore */ }
-  }
-
-  function stopPolling() {
-    if (pollTimer) {
-      clearInterval(pollTimer)
-      pollTimer = null
-    }
-  }
-
-  /** 仅在事件订阅失败时作为兜底 */
-  function startPollingFallback() {
-    stopPolling()
-    pollTimer = setInterval(async () => {
-      try {
-        const result = await invoke<{ packets: PacketRow[]; total: number }>(
-          'get_packets',
-          { limit: 100 }
-        )
-        for (const pkt of [...result.packets].reverse()) {
-          ingestPacket(pkt)
-        }
-      } catch { /* ignore */ }
-    }, 400)
   }
 
   async function init() {
-    // 串行化，避免并发 init 双订阅
-    if (initPromise) {
-      await initPromise
-      return
-    }
-    initPromise = (async () => {
-      dispose()
-      await loadHistory(500)
-
-      try {
-        unlisten = await onRxData((payload: RxEventPayload) => {
-          const hex = payload.hex || payload.bytes_hex || ''
-          const rawBytes = payload.bytes?.length
-            ? payload.bytes
-            : hexToBytes(hex)
-          addLine(
-            'rx',
-            payload.channel_id,
-            hex,
-            payload.text || '',
-            rawBytes,
-            payload.timestamp,
-            payload.seq
-          )
-        })
-        eventDriven.value = true
-      } catch (e) {
-        console.warn('[terminal] onRxData failed, fallback to polling', e)
-        eventDriven.value = false
-        startPollingFallback()
+    const hub = useRxHub()
+    await hub.init()
+    if (!unsub) {
+      // 回放已有记录
+      lines.value = []
+      lineIdCounter = 0
+      for (const r of hub.records) {
+        lines.value.push(recordToLine(r))
       }
-    })()
-
-    try {
-      await initPromise
-    } finally {
-      initPromise = null
+      unsub = hub.subscribe(onHubRecord)
     }
   }
 
   function dispose() {
-    unlisten?.()
-    unlisten = null
-    eventDriven.value = false
-    stopPolling()
+    unsub?.()
+    unsub = null
   }
 
   function displayText(line: TerminalLine): string {
@@ -254,67 +133,43 @@ export const useTerminalStore = defineStore('terminal', () => {
   }
 
   async function sendText(channelId: string, text: string, suffix: string = 'none', sendEncoding?: Encoding) {
+    const hub = useRxHub()
     const format = sendEncoding === 'gbk'
       ? 'gbk'
       : sendEncoding === 'hex'
         ? 'hex'
         : 'text'
 
-    if (format === 'hex') {
-      const hex = text.replace(/\s+/g, '')
-      const result = await invoke<SendResult>('send_data', {
-        request: { channel_id: channelId, data: hex, format: 'hex', suffix: 'none' },
-      })
-      addLine('tx', result.channel_id, result.hex, result.text, hexToBytes(result.hex), result.timestamp, result.seq)
-      return
-    }
-
     const result = await invoke<SendResult>('send_data', {
       request: {
         channel_id: channelId,
-        data: text,
-        format: format === 'text' ? 'text' : format,
-        suffix,
+        data: format === 'hex' ? text.replace(/\s+/g, '') : text,
+        format: format === 'hex' ? 'hex' : format === 'gbk' ? 'gbk' : 'text',
+        suffix: format === 'hex' ? 'none' : suffix,
       },
     })
-    // 仅用后端回包入账；无轮询时不会二次插入
-    addLine(
-      'tx',
-      result.channel_id,
-      result.hex,
-      result.text,
-      hexToBytes(result.hex),
-      result.timestamp,
-      result.seq
-    )
+    hub.pushTx({
+      channelId: result.channel_id,
+      hex: result.hex,
+      text: result.text,
+      bytes: hub.hexToBytes(result.hex),
+      timestamp: result.timestamp,
+      seq: result.seq,
+    })
   }
 
   async function sendHex(channelId: string, hex: string) {
-    const clean = hex.replace(/\s+/g, '')
-    const result = await invoke<SendResult>('send_data', {
-      request: { channel_id: channelId, data: clean, format: 'hex', suffix: 'none' },
-    })
-    addLine('tx', result.channel_id, result.hex, result.text, hexToBytes(result.hex), result.timestamp, result.seq)
+    await sendText(channelId, hex, 'none', 'hex')
   }
 
   async function clear() {
-    await invoke('clear_packets')
+    await useRxHub().clear()
     lines.value = []
-    seenKeys.clear()
-  }
-
-  function hexToBytes(hex: string): number[] {
-    const clean = hex.replace(/\s+/g, '')
-    const bytes: number[] = []
-    for (let i = 0; i < clean.length; i += 2) {
-      bytes.push(parseInt(clean.substring(i, i + 2), 16))
-    }
-    return bytes
   }
 
   return {
     lines, encoding, maxLines, displayConfig, activeChannelId, filteredLines, rxCount, txCount,
     eventDriven,
-    init, dispose, addLine, sendText, sendHex, clear, displayText,
+    init, dispose, sendText, sendHex, clear, displayText,
   }
 })

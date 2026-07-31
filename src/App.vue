@@ -18,7 +18,20 @@
           mode="inline"
           @click="handleMenuClick"
         >
-          <a-menu-item v-for="item in menuItems" :key="item.key">
+          <a-menu-item-group v-if="!collapsed" title="通道" />
+          <a-menu-item
+            v-for="ch in connectedChannels"
+            :key="'ch:' + ch.channelId"
+          >
+            <template #icon><ApiOutlined /></template>
+            <span class="channel-menu-label">{{ channelMenuLabel(ch) }}</span>
+          </a-menu-item>
+          <a-menu-item v-if="connectedChannels.length === 0" key="connection" disabled>
+            <span style="opacity:0.55">暂无连接</span>
+          </a-menu-item>
+          <a-menu-divider />
+          <a-menu-item-group v-if="!collapsed" title="全局" />
+          <a-menu-item v-for="item in globalMenuItems" :key="item.key">
             <template #icon><component :is="item.icon" /></template>
             <span>{{ item.label }}</span>
           </a-menu-item>
@@ -67,13 +80,17 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import zhCN from 'ant-design-vue/es/locale/zh_CN'
 import {
-  LinkOutlined, CodeOutlined, BugOutlined, SwapOutlined,
+  LinkOutlined, SwapOutlined,
   FileTextOutlined, SettingOutlined, MenuUnfoldOutlined,
-  MenuFoldOutlined, InfoCircleOutlined,
+  MenuFoldOutlined, InfoCircleOutlined, ApiOutlined, FolderOutlined,
 } from '@ant-design/icons-vue'
-import { useConnectionStore, useTerminalStore, useLogStore } from './stores'
+import {
+  useConnectionStore, useTerminalStore, useLogStore,
+  useRxHub, useProtocolStore, useWorkspaceStore,
+} from './stores'
 import { isTauri } from './api/tauri'
 import AppContextMenu from './components/AppContextMenu.vue'
+import type { ChannelInfo } from './stores/connectionStore'
 
 const isTauriEnv = isTauri()
 const router = useRouter()
@@ -81,33 +98,68 @@ const route = useRoute()
 const connectionStore = useConnectionStore()
 const terminalStore = useTerminalStore()
 const logStore = useLogStore()
+const rxHub = useRxHub()
+const protocolStore = useProtocolStore()
+const workspaceStore = useWorkspaceStore()
 
 const collapsed = ref(false)
 
-const menuItems = [
+const globalMenuItems = [
   { key: 'connection', label: '连接管理', icon: LinkOutlined },
-  { key: 'terminal', label: '终端', icon: CodeOutlined },
-  { key: 'protocol', label: '协议解析', icon: BugOutlined },
   { key: 'forward', label: '端口转发', icon: SwapOutlined },
+  { key: 'workspace-config', label: '工作区', icon: FolderOutlined },
   { key: 'log', label: '系统日志', icon: FileTextOutlined },
   { key: 'settings', label: '设置', icon: SettingOutlined },
   { key: 'about', label: '关于', icon: InfoCircleOutlined },
 ]
 
-const selectedKeys = computed(() => [route.name as string])
-const pageTitle = computed(() => (route.meta?.title as string) || '')
+const selectedKeys = computed(() => {
+  if (route.name === 'workspace') {
+    return ['ch:' + String(route.params.channelId || '')]
+  }
+  return [route.name as string]
+})
+
+const pageTitle = computed(() => {
+  if (route.name === 'workspace') {
+    const id = String(route.params.channelId || '')
+    const ch = connectionStore.channelList.find(c => c.channelId === id)
+    return ch ? `通道 · ${ch.portName || id}` : '通道工作区'
+  }
+  return (route.meta?.title as string) || ''
+})
+
 const connectedChannels = computed(() => connectionStore.connectedChannels)
 
+function channelMenuLabel(ch: ChannelInfo) {
+  if (ch.transportType === 'serial') return ch.portName || ch.channelId
+  if (ch.transportType === 'tcp_server_client') return `Client ${ch.portName}`
+  return ch.portName || ch.channelId
+}
+
 function handleMenuClick(info: { key: string }) {
-  router.push({ name: info.key })
+  const key = String(info.key)
+  if (key.startsWith('ch:')) {
+    const channelId = key.slice(3)
+    workspaceStore.openChannel(channelId)
+    router.push({ name: 'workspace', params: { channelId } })
+    return
+  }
+  router.push({ name: key })
 }
 
 async function handleDisconnectChannel(channelId: string) {
   await connectionStore.disconnect(channelId)
+  workspaceStore.removeChannel(channelId)
+  if (route.name === 'workspace' && route.params.channelId === channelId) {
+    router.push({ name: 'connection' })
+  }
 }
 
 onMounted(async () => {
   await connectionStore.init()
+  await rxHub.init()
+  protocolStore.init()
   await terminalStore.init()
   await logStore.init()
 })
@@ -115,6 +167,8 @@ onMounted(async () => {
 onUnmounted(() => {
   connectionStore.dispose()
   terminalStore.dispose()
+  protocolStore.dispose()
+  rxHub.dispose()
   logStore.dispose()
 })
 </script>
@@ -229,6 +283,15 @@ onUnmounted(() => {
 }
 .fade-enter-from, .fade-leave-to {
   opacity: 0;
+}
+
+.channel-menu-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+  max-width: 140px;
+  vertical-align: bottom;
 }
 </style>
 

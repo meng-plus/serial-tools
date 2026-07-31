@@ -50,6 +50,12 @@ pub fn run() {
             commands::config::save_session,
             commands::config::list_sessions,
             commands::config::delete_session,
+            // 导出 / 通道实时日志
+            commands::fs_util::get_data_dirs,
+            commands::fs_util::write_export_file,
+            commands::fs_util::create_channel_log_file,
+            commands::fs_util::append_channel_log,
+            commands::fs_util::reveal_in_folder,
             // 协议解析
             commands::protocol::get_parsed_results,
             commands::protocol::clear_parsed,

@@ -201,4 +201,15 @@ BusSubscription { channel_id, direction: RxToBus | TxFromBus | Both }
 **明确不做**（见 ROADMAP P3）:
 - 独立 ChannelManager crate
 - async Transport 整仓重写
-- 在 stub 上假装已实现 MQTT / 协议解析
+- 在 stub 上假装已实现 MQTT / 完整后端协议解析
+
+## 19. 协议解析放前端 + 通道优先多视图
+
+**决策**: 正则/JSON 解析引擎在前端；UI 以通道为中心，一视图只绑一通道。
+
+**理由**:
+- 与现有 `rx-data` 扇出模型一致，多视图可并行订阅且不抢读
+- 字符串协议与图表（vue-echarts）天然在前端闭环
+- 避免过早建设后端 ProtocolChannel；二进制协议需要时再迁
+
+**详情**: [protocol-multi-view/DESIGN_protocol-multi-view.md](./protocol-multi-view/DESIGN_protocol-multi-view.md)

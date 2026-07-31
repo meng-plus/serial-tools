@@ -119,7 +119,7 @@
                 </template>
               </div>
               <a-space>
-                <a-button size="small" @click="openTerminal(ch.channelId)">终端</a-button>
+                <a-button size="small" @click="openTerminal(ch.channelId)">工作区</a-button>
                 <a-button size="small" danger @click="handleDisconnect(ch.channelId)">断开</a-button>
               </a-space>
             </div>
@@ -137,7 +137,7 @@
                 <span class="channel-id">{{ client.portName || client.channelId }}</span>
                 <a-badge status="success" text="在线" />
                 <a-space>
-                  <a-button size="small" type="link" @click="openTerminal(client.channelId)">终端</a-button>
+                  <a-button size="small" type="link" @click="openTerminal(client.channelId)">工作区</a-button>
                   <a-button size="small" type="link" danger @click="handleKickClient(client.channelId)">断开</a-button>
                 </a-space>
               </div>
@@ -237,6 +237,9 @@ async function handleConnect() {
     })
     if (result.success) {
       message.success(result.message)
+      if (result.channel_id) {
+        router.push({ name: 'workspace', params: { channelId: result.channel_id } })
+      }
     }
   } catch (e: any) {
     message.error(String(e))
@@ -269,7 +272,7 @@ async function handleDisconnectAll() {
 }
 
 function openTerminal(channelId: string) {
-  router.push({ name: 'terminal', query: { channel: channelId } })
+  router.push({ name: 'workspace', params: { channelId } })
 }
 
 onMounted(() => {

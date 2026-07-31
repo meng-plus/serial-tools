@@ -12,11 +12,12 @@
 
 ## 推荐下一阶段（按价值）
 
-### P0 — 协议解析做实
+### P0 — 协议解析 + 通道多视图（前端引擎）
 
-- 将 `rx-data` / packets 接入解析管线
-- 先落地：正则 / 简单字节模式；再 Modbus RTU
-- 替换 `commands/protocol.rs` 空实现
+- 设计见 [protocol-multi-view/DESIGN_protocol-multi-view.md](./protocol-multi-view/DESIGN_protocol-multi-view.md)
+- ✅ rxHub + regex/JSON + valueBus + 通道工作区（收发/解析/监控/图表）
+- ✅ Workspace 整包 YAML/JSON 导入导出；定时发送 v2（每条独立周期/次数/变量）
+- 下一步：对话视图（可选 VT100）
 
 ### P1 — 终端效率
 

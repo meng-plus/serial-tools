@@ -18,7 +18,7 @@
 | 自定义右键菜单 | ✅ | 替代浏览器默认菜单 |
 | MQTT | ⏳ 占位 | `mqtt.rs` stub，无 UI |
 | UDP | ❌ 未实现 | 勿写成已交付 |
-| 协议解析管线 | ⏳ UI 壳 | 后端 `protocol.rs` 仍返回空 |
+| 协议解析管线 | 🚧 前端引擎 | 见 protocol-multi-view；后端 `protocol.rs` 仍 stub |
 | Framer 接线 | ⏳ 库内有 | `framer.rs` 未接入业务 |
 | 日志 BIN/CSV/HEX 导出 | ❌ 未实现 | 仅内存系统日志 |
 | ChannelManager crate | 🔮 延后 | 现用 `AppState` |
@@ -70,15 +70,15 @@ serial-tools/
 ├── crates/transport/     # 唯一独立业务 crate
 │   └── serial / tcp/{client,server} / mqtt(stub) / mock / framer(未接线)
 ├── src-tauri/src/
-│   ├── state.rs               # AppState + DataBus + spawn_reader + remove_channel
-│   ├── disconnect_reason.rs   # Local | Remote | Error
-│   ├── channel_lifecycle.rs   # register / close_* / finalize_peer / emit
-│   ├── tcp_server_monitor.rs  # 新客户端入账（走 register_server_client）
-│   ├── event_bridge.rs
-│   └── commands/              # connection 仅命令编排，无读循环实现
+│   ├── state.rs · channel_lifecycle · tcp_server_monitor · …
+│   └── commands/
 ├── src/                  # Vue
-│   ├── pages / stores / api / components / router
+│   ├── pages/            # Connection · ChannelWorkspace · …
+│   ├── views/            # TerminalView · ParsedLogView · MonitorView（单通道）
+│   ├── protocol/         # 前端解析引擎（regex/json）
+│   ├── stores/           # rxHub · protocol · valueBus · workspace · …
 └── docs/
+    └── protocol-multi-view/  # 协议+多视图设计
 ```
 
 **规范**：不提前拆 `channel` / `protocol` crate；稳定后再拆（见 DESIGN-DECISIONS §2）。
@@ -203,6 +203,7 @@ GB2312：UI 已移除；后端若收到 `gb2312` 按 GBK 兼容处理。
 | 文档 | 职责 |
 |------|------|
 | 本文 | 架构真相与规范 |
+| protocol-multi-view/DESIGN_* | 协议引擎 + 通道多视图设计 |
 | DESIGN-DECISIONS.md | 为何这样选 |
 | COMMUNICATION-ARCH-REFINEMENT.md | 演进路线（含未做项） |
 | ROADMAP.md | 下一步优先级 |
