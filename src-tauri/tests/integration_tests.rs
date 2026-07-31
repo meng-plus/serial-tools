@@ -252,6 +252,7 @@ async fn test_appstate_rx_broadcast() {
         channel_id: "ch1".to_string(),
         bytes: b"data".to_vec(),
         timestamp: "12:00:00.000".to_string(),
+        seq: 1,
     };
 
     state.rx_broadcast.send(event.clone()).unwrap();
@@ -647,6 +648,7 @@ async fn test_rx_broadcast_multi_subscriber() {
         channel_id: "ch1".to_string(),
         bytes: b"multi".to_vec(),
         timestamp: "12:00:00.000".to_string(),
+        seq: 2,
     };
     state.rx_broadcast.send(event).unwrap();
 
@@ -681,11 +683,11 @@ async fn test_log_writes_to_both_logs_and_broadcast() {
 // L6: TcpServerTransport 集成测试
 // ══════════════════════════════════════════════════════════════
 
-/// TCP Server 多客户端并发读写
+/// TCP Server 多客户端并发：广播 TX + 独占读通道 RX
 #[tokio::test]
 async fn test_tcp_server_multi_client_concurrent() {
     use std::io::{Read, Write};
-    use transport::tcp::TcpServerTransport;
+    use transport::tcp::{TcpClientTransport, TcpServerTransport};
     use transport::Transport;
 
     let mut server = TcpServerTransport::new("127.0.0.1".to_string(), 0);
@@ -699,22 +701,36 @@ async fn test_tcp_server_multi_client_concurrent() {
     c2.set_read_timeout(Some(std::time::Duration::from_millis(500))).unwrap();
     std::thread::sleep(std::time::Duration::from_millis(300));
 
-    // 客户端1发送数据
+    let mut new_clients = server.take_new_clients();
+    assert_eq!(new_clients.len(), 2);
+    let (addr1, stream1) = new_clients.remove(0);
+    let (addr2, stream2) = new_clients.remove(0);
+    let peer1 = TcpClientTransport::from_stream(stream1, addr1);
+    let peer2 = TcpClientTransport::from_stream(stream2, addr2);
+
+    // 客户端1发送数据 → 由独占读通道读取
     c1.write_all(b"from c1").unwrap();
     c1.flush().unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(100));
-
-    // 服务端读取
     let mut buf = [0u8; 64];
-    let n = server.read(&mut buf).unwrap();
+    let mut n = 0;
+    for _ in 0..30 {
+        match peer1.read(&mut buf) {
+            Ok(sz) if sz > 0 => { n = sz; break; }
+            _ => std::thread::sleep(std::time::Duration::from_millis(20)),
+        }
+    }
     assert_eq!(&buf[..n], b"from c1");
 
     // 客户端2发送数据
     c2.write_all(b"from c2").unwrap();
     c2.flush().unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(100));
-
-    let n = server.read(&mut buf).unwrap();
+    n = 0;
+    for _ in 0..30 {
+        match peer2.read(&mut buf) {
+            Ok(sz) if sz > 0 => { n = sz; break; }
+            _ => std::thread::sleep(std::time::Duration::from_millis(20)),
+        }
+    }
     assert_eq!(&buf[..n], b"from c2");
 
     // 服务端广播回复
@@ -786,9 +802,10 @@ async fn test_bus_create_and_list() {
         subscriptions: Vec::new(),
         bus_tx,
         cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        sub_cancels: std::collections::HashMap::new(),
         threads: Vec::new(),
-        rx_bytes: 0,
-        tx_bytes: 0,
+        rx_bytes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        tx_bytes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
     };
 
     state.buses.write().await.insert("bus-1".to_string(), bus);

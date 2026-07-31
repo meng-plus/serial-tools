@@ -24,6 +24,21 @@ pub enum TransportError {
     Io(#[from] std::io::Error),
 }
 
+/// Duplex 模式（通道层能力声明）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DuplexMode {
+    /// 全双工：TX/RX 独立
+    #[default]
+    Full,
+    /// 半双工：TX/RX 互斥（如 RS485）
+    Half,
+    /// 只发送
+    SimplexTx,
+    /// 只接收
+    SimplexRx,
+}
+
 /// 传输层数据块
 #[derive(Debug, Clone)]
 pub struct TransportChunk {
@@ -53,6 +68,10 @@ pub trait Transport: Send + Sync {
     fn open(&mut self) -> Result<(), TransportError>;
     /// 关闭连接
     fn close(&mut self) -> Result<(), TransportError>;
+    /// 通过共享引用关闭（供 `Arc<dyn Transport>` 路径使用）
+    fn shutdown(&self) -> Result<(), TransportError> {
+        Ok(())
+    }
     /// 发送原始字节
     fn write(&self, bytes: &[u8]) -> Result<usize, TransportError>;
     /// 读取原始字节（同步阻塞，由独立线程调用）
@@ -61,8 +80,14 @@ pub trait Transport: Send + Sync {
     fn is_active(&self) -> bool;
     /// 描述信息
     fn descriptor(&self) -> &TransportDescriptor;
+    /// Duplex 能力
+    fn duplex_mode(&self) -> DuplexMode {
+        DuplexMode::Full
+    }
     /// 已连接客户端列表（仅 TCP Server 有效）
-    fn client_info(&self) -> Vec<String> { vec![] }
+    fn client_info(&self) -> Vec<String> {
+        vec![]
+    }
 }
 
 /// 传输层描述信息
@@ -264,6 +289,32 @@ mod mqtt_tests {
         assert!(mqtt.write(b"test").is_err());
         let mut buf = [0u8; 64];
         assert!(mqtt.read(&mut buf).is_err());
+    }
+}
+
+#[cfg(test)]
+mod duplex_tests {
+    use crate::{DuplexMode, Transport};
+    use crate::serial::{SerialConfig, SerialTransport};
+    use crate::tcp::TcpClientTransport;
+
+    #[test]
+    fn test_duplex_default_full() {
+        let tcp = TcpClientTransport::new("127.0.0.1".to_string(), 1);
+        assert_eq!(tcp.duplex_mode(), DuplexMode::Full);
+    }
+
+    #[test]
+    fn test_serial_half_duplex_mode() {
+        let serial = SerialTransport::new(SerialConfig {
+            port: "COM1".to_string(),
+            baud_rate: 115200,
+            data_bits: 8,
+            stop_bits: 1,
+            parity: "None".to_string(),
+            half_duplex: true,
+        });
+        assert_eq!(serial.duplex_mode(), DuplexMode::Half);
     }
 }
 

@@ -114,9 +114,11 @@ const newSub = reactive({
 })
 
 const busColumns = [
-  { title: '名称', dataIndex: 'name', width: 200 },
+  { title: '名称', dataIndex: 'name', width: 180 },
   { title: '状态', key: 'status', width: 80 },
-  { title: '订阅', key: 'subs', width: 100 },
+  { title: '订阅', key: 'subs', width: 80 },
+  { title: 'RX 字节', dataIndex: 'rx_bytes', width: 90 },
+  { title: 'TX 字节', dataIndex: 'tx_bytes', width: 90 },
   { title: '操作', key: 'action', width: 120 },
 ]
 

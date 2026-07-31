@@ -2,6 +2,7 @@
 
 use super::*;
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// Mock Transport：内存中的可编程传输层
@@ -11,7 +12,7 @@ pub struct MockTransport {
     descriptor: TransportDescriptor,
     rx_queue: Arc<Mutex<VecDeque<Vec<u8>>>>,
     tx_log: Arc<Mutex<Vec<Vec<u8>>>>,
-    active: bool,
+    active: AtomicBool,
 }
 
 impl MockTransport {
@@ -24,7 +25,7 @@ impl MockTransport {
             },
             rx_queue: Arc::new(Mutex::new(VecDeque::new())),
             tx_log: Arc::new(Mutex::new(Vec::new())),
-            active: false,
+            active: AtomicBool::new(false),
         }
     }
 
@@ -59,17 +60,22 @@ impl MockTransport {
 
 impl Transport for MockTransport {
     fn open(&mut self) -> Result<(), TransportError> {
-        self.active = true;
+        self.active.store(true, Ordering::Relaxed);
         Ok(())
     }
 
     fn close(&mut self) -> Result<(), TransportError> {
-        self.active = false;
+        self.active.store(false, Ordering::Relaxed);
+        Ok(())
+    }
+
+    fn shutdown(&self) -> Result<(), TransportError> {
+        self.active.store(false, Ordering::Relaxed);
         Ok(())
     }
 
     fn write(&self, bytes: &[u8]) -> Result<usize, TransportError> {
-        if !self.active {
+        if !self.active.load(Ordering::Relaxed) {
             return Err(TransportError::NotConnected);
         }
         self.tx_log.lock().unwrap().push(bytes.to_vec());
@@ -77,7 +83,7 @@ impl Transport for MockTransport {
     }
 
     fn read(&self, buf: &mut [u8]) -> Result<usize, TransportError> {
-        if !self.active {
+        if !self.active.load(Ordering::Relaxed) {
             return Err(TransportError::NotConnected);
         }
         let mut q = self.rx_queue.lock().unwrap();
@@ -92,7 +98,7 @@ impl Transport for MockTransport {
     }
 
     fn is_active(&self) -> bool {
-        self.active
+        self.active.load(Ordering::Relaxed)
     }
 
     fn descriptor(&self) -> &TransportDescriptor {

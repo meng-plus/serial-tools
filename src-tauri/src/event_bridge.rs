@@ -10,20 +10,22 @@ use tokio::sync::broadcast;
 #[derive(Clone, serde::Serialize)]
 pub struct RxEventPayload {
     pub channel_id: String,
-    /// 原始字节的 hex 编码（与 hex 字段相同，用于前端解码）
     pub bytes_hex: String,
     pub hex: String,
     pub text: String,
     pub timestamp: String,
+    pub seq: u64,
 }
 
-/// 推送给前端的连接状态变更事件载荷
 #[derive(Clone, serde::Serialize)]
 pub struct ConnectionEventPayload {
     pub channel_id: String,
     pub connected: bool,
     pub transport_type: String,
     pub port_name: String,
+    pub parent_channel_id: Option<String>,
+    /// 父 Server 当前在线客户端地址列表（事件驱动刷新用）
+    pub server_clients: Option<Vec<String>>,
 }
 
 /// 启动事件桥接：独立线程订阅 rx_broadcast，通过 Tauri emit 推送给前端
@@ -40,8 +42,11 @@ pub fn start_event_bridge(app: AppHandle, rx_sender: broadcast::Sender<RxBroadca
                         bytes_hex: hex_str,
                         text: String::from_utf8_lossy(&event.bytes).to_string(),
                         timestamp: event.timestamp,
+                        seq: event.seq,
                     };
-                    let _ = app.emit("rx-data", payload);
+                    if let Err(e) = app.emit("rx-data", payload) {
+                        eprintln!("[event_bridge] emit rx-data failed: {}", e);
+                    }
                 }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
                     eprintln!("[event_bridge] lagged, skipped {} events", n);

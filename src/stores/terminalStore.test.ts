@@ -13,6 +13,7 @@ vi.mock('@/api/events', () => ({
 
 import { setActivePinia, createPinia } from 'pinia'
 import { useTerminalStore } from '@/stores/terminalStore'
+import { useConnectionStore } from '@/stores/connectionStore'
 
 describe('terminalStore', () => {
   beforeEach(() => {
@@ -74,23 +75,45 @@ describe('terminalStore', () => {
 
   it('should filter TCP Server to include client channels', async () => {
     const store = useTerminalStore()
+    const conn = useConnectionStore()
     const { invoke } = await import('@/api/tauri')
     vi.mocked(invoke).mockResolvedValue({ success: true, bytes_sent: 1 })
+
+    conn.channelList.push({
+      channelId: 'tcp_server-0.0.0.0:5000',
+      connected: true,
+      transportType: 'tcp_server',
+      portName: '0.0.0.0:5000',
+      clients: [],
+    })
+    conn.channelList.push({
+      channelId: 'tcp_client-192.168.1.5:12345',
+      connected: true,
+      transportType: 'tcp_server_client',
+      portName: '192.168.1.5:12345',
+      clients: [],
+      parentChannelId: 'tcp_server-0.0.0.0:5000',
+    })
+    conn.channelList.push({
+      channelId: 'tcp_client-192.168.1.6:12345',
+      connected: true,
+      transportType: 'tcp_server_client',
+      portName: '192.168.1.6:12345',
+      clients: [],
+      parentChannelId: 'tcp_server-0.0.0.0:5000',
+    })
 
     await store.sendText('tcp_server-0.0.0.0:5000', 'server')
     await store.sendText('tcp_client-192.168.1.5:12345', 'client1')
     await store.sendText('tcp_client-192.168.1.6:12345', 'client2')
     await store.sendText('serial-COM3', 'serial')
 
-    // 选择 TCP Server 应该包含 server + 所有 client
     store.activeChannelId = 'tcp_server-0.0.0.0:5000'
     expect(store.filteredLines).toHaveLength(3)
 
-    // 选择具体 client 应该只显示该 client
     store.activeChannelId = 'tcp_client-192.168.1.5:12345'
     expect(store.filteredLines).toHaveLength(1)
 
-    // 选择 serial 不应该包含 TCP
     store.activeChannelId = 'serial-COM3'
     expect(store.filteredLines).toHaveLength(1)
   })
@@ -173,10 +196,9 @@ describe('terminalStore', () => {
   it('should filter rx data by channel', () => {
     const store = useTerminalStore()
 
-    // 模拟 RX 数据到达
-    store['addLine']('rx', 'ch1', '48656c6c6f', 'Hello', [72, 101, 108, 108, 111])
-    store['addLine']('rx', 'ch2', '576f726c64', 'World', [87, 111, 114, 108, 100])
-    store['addLine']('tx', 'ch1', '', 'tx-data', [])
+    store.addLine('rx', 'ch1', '48656c6c6f', 'Hello', [72, 101, 108, 108, 111])
+    store.addLine('rx', 'ch2', '576f726c64', 'World', [87, 111, 114, 108, 100])
+    store.addLine('tx', 'ch1', '', 'tx-data', [])
 
     store.activeChannelId = 'ch1'
     expect(store.filteredLines).toHaveLength(2)
@@ -187,6 +209,45 @@ describe('terminalStore', () => {
     expect(store.filteredLines).toHaveLength(3)
     expect(store.rxCount).toBe(2)
     expect(store.txCount).toBe(1)
+  })
+
+  it('should filter tcp server clients by parent', () => {
+    const conn = useConnectionStore()
+    const store = useTerminalStore()
+
+    conn.channelList.push({
+      channelId: 'tcp_server-0.0.0.0:5000',
+      connected: true,
+      transportType: 'tcp_server',
+      portName: '0.0.0.0:5000',
+      clients: [],
+    })
+    conn.channelList.push({
+      channelId: 'tcp_client-127.0.0.1:1',
+      connected: true,
+      transportType: 'tcp_server_client',
+      portName: '127.0.0.1:1',
+      clients: [],
+      parentChannelId: 'tcp_server-0.0.0.0:5000',
+    })
+    conn.channelList.push({
+      channelId: 'tcp_client-127.0.0.1:2',
+      connected: true,
+      transportType: 'tcp_server_client',
+      portName: '127.0.0.1:2',
+      clients: [],
+      parentChannelId: 'tcp_server-0.0.0.0:6000',
+    })
+
+    store.addLine('rx', 'tcp_client-127.0.0.1:1', 'aa', 'a', [0xaa])
+    store.addLine('rx', 'tcp_client-127.0.0.1:2', 'bb', 'b', [0xbb])
+
+    store.activeChannelId = 'tcp_server-0.0.0.0:5000'
+    expect(store.filteredLines).toHaveLength(1)
+    expect(store.filteredLines[0].channelId).toBe('tcp_client-127.0.0.1:1')
+
+    store.activeChannelId = 'tcp_client-127.0.0.1:1'
+    expect(store.filteredLines).toHaveLength(1)
   })
 
   it('should convert hex string to bytes', () => {

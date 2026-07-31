@@ -48,17 +48,34 @@ impl TcpClientTransport {
 
 impl Transport for TcpClientTransport {
     fn open(&mut self) -> Result<(), TransportError> {
-        let addr = format!("{}:{}", self.host, self.port);
-        let stream = TcpStream::connect(&addr)
+        use std::net::ToSocketAddrs;
+        let addr = (self.host.as_str(), self.port)
+            .to_socket_addrs()
+            .map_err(|e| TransportError::Connect(format!("地址解析失败: {}", e)))?
+            .next()
+            .ok_or_else(|| TransportError::Connect("无法解析主机地址".to_string()))?;
+
+        // 3 秒连接超时，避免长时间阻塞 UI
+        let stream = TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(3))
             .map_err(|e| TransportError::Connect(e.to_string()))?;
-        stream.set_read_timeout(Some(std::time::Duration::from_millis(10)))
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_millis(10)))
+            .map_err(TransportError::Io)?;
+        stream
+            .set_write_timeout(Some(std::time::Duration::from_secs(3)))
             .map_err(TransportError::Io)?;
         *self.stream.lock().unwrap() = Some(stream);
         Ok(())
     }
 
     fn close(&mut self) -> Result<(), TransportError> {
-        *self.stream.lock().unwrap() = None;
+        self.shutdown()
+    }
+
+    fn shutdown(&self) -> Result<(), TransportError> {
+        if let Some(stream) = self.stream.lock().unwrap().take() {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+        }
         Ok(())
     }
 
@@ -71,7 +88,17 @@ impl Transport for TcpClientTransport {
     fn read(&self, buf: &mut [u8]) -> Result<usize, TransportError> {
         let mut guard = self.stream.lock().unwrap();
         let stream = guard.as_mut().ok_or(TransportError::NotConnected)?;
-        stream.read(buf).map_err(|e| TransportError::Receive(e.to_string()))
+        match stream.read(buf) {
+            Ok(n) => Ok(n),
+            Err(ref e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut =>
+            {
+                // 超时/无数据：返回错误让读线程短暂休眠，勿当成 EOF(Ok(0))
+                Err(TransportError::Receive(e.to_string()))
+            }
+            Err(e) => Err(TransportError::Receive(e.to_string())),
+        }
     }
 
     fn is_active(&self) -> bool {
@@ -171,7 +198,6 @@ impl Transport for TcpServerTransport {
         *self.listener.lock().unwrap() = Some(listener);
 
         let clients = self.clients.clone();
-        let pending = self.pending.clone();
         let new_clients = self.new_clients.clone();
         let running = self.running.clone();
         let listener_ref = Mutex::new(self.listener.lock().unwrap().take().unwrap());
@@ -188,49 +214,18 @@ impl Transport for TcpServerTransport {
                             .set_read_timeout(Some(std::time::Duration::from_millis(10)))
                             .ok();
 
-                        // 将流克隆：一份给 clients map，一份给读线程
-                        let cloned_stream = stream.try_clone().unwrap();
-                        clients.lock().unwrap().insert(addr, cloned_stream);
-
-                        // 将新客户端推入 new_clients 队列，供外部创建独立通道
-                        new_clients.lock().unwrap().push((addr, stream.try_clone().unwrap()));
-
-                        // 为每个客户端启动读线程
-                        let clients_clone = clients.clone();
-                        let pending_clone = pending.clone();
-                        let running_clone = running.clone();
-                        let mut read_stream = stream;
-
-                        thread::spawn(move || {
-                            let mut buf = [0u8; 4096];
-                            loop {
-                                match read_stream.read(&mut buf) {
-                                    Ok(0) => {
-                                        clients_clone.lock().unwrap().remove(&addr);
-                                        break;
-                                    }
-                                    Ok(n) => {
-                                        let data = buf[..n].to_vec();
-                                        pending_clone
-                                            .lock()
-                                            .unwrap()
-                                            .push((addr, data));
-                                    }
-                                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock
-                                        || e.kind() == std::io::ErrorKind::TimedOut =>
-                                    {
-                                        if !*running_clone.lock().unwrap() {
-                                            clients_clone.lock().unwrap().remove(&addr);
-                                            break;
-                                        }
-                                    }
-                                    Err(_) => {
-                                        clients_clone.lock().unwrap().remove(&addr);
-                                        break;
-                                    }
-                                }
+                        // 写侧克隆：供广播 / kick / send_to_client
+                        match stream.try_clone() {
+                            Ok(ws) => {
+                                clients.lock().unwrap().insert(addr, ws);
                             }
-                        });
+                            Err(e) => {
+                                eprintln!("[tcp_server] clone for write failed: {}", e);
+                            }
+                        }
+
+                        // 读侧所有权交给外部监控线程，创建独占读通道（避免双读竞争）
+                        new_clients.lock().unwrap().push((addr, stream));
                     }
                     Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                         thread::sleep(std::time::Duration::from_millis(10));
@@ -246,14 +241,20 @@ impl Transport for TcpServerTransport {
         Ok(())
     }
 
-    fn close(&mut self) -> Result<(), TransportError> {
+    fn shutdown(&self) -> Result<(), TransportError> {
         *self.running.lock().unwrap() = false;
         *self.listener.lock().unwrap() = None;
         self.clients.lock().unwrap().clear();
+        self.new_clients.lock().unwrap().clear();
+        self.pending.lock().unwrap().clear();
         if let Some(handle) = self.accept_handle.lock().unwrap().take() {
             let _ = handle.join();
         }
         Ok(())
+    }
+
+    fn close(&mut self) -> Result<(), TransportError> {
+        self.shutdown()
     }
 
     fn write(&self, bytes: &[u8]) -> Result<usize, TransportError> {
@@ -525,7 +526,8 @@ mod tests {
     }
 
     #[test]
-    fn test_server_read_from_pending() {
+    fn test_server_read_via_client_channel() {
+        // 单读者模型：数据由 take_new_clients 得到的流独占读取，不再走 pending
         let mut server = TcpServerTransport::new("127.0.0.1".to_string(), 0);
         server.open().unwrap();
         let port = server.bound_port().unwrap();
@@ -533,19 +535,28 @@ mod tests {
         let mut client = TcpStream::connect(format!("127.0.0.1:{}", port)).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(200));
 
-        // 客户端发送数据
+        let mut new_clients = server.take_new_clients();
+        assert_eq!(new_clients.len(), 1);
+        let (addr, stream) = new_clients.remove(0);
+        let peer = TcpClientTransport::from_stream(stream, addr);
+
         client.write_all(b"test data").unwrap();
         client.flush().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(100));
 
-        // 服务端读取
         let mut buf = [0u8; 64];
-        let n = server.read(&mut buf).unwrap();
+        // 可能因超时重试几次
+        let mut n = 0;
+        for _ in 0..20 {
+            match peer.read(&mut buf) {
+                Ok(sz) if sz > 0 => {
+                    n = sz;
+                    break;
+                }
+                _ => std::thread::sleep(std::time::Duration::from_millis(20)),
+            }
+        }
         assert_eq!(&buf[..n], b"test data");
-
-        // 再次读取应该为空
-        let n = server.read(&mut buf).unwrap();
-        assert_eq!(n, 0);
 
         server.close().unwrap();
     }

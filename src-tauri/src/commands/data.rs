@@ -7,7 +7,8 @@ use tauri::State;
 pub struct SendDataRequest {
     pub channel_id: String,
     pub data: String,
-    pub format: String, // text / hex
+    /// text / hex / gbk / gb2312
+    pub format: String,
     pub suffix: Option<String>, // none / cr / lf / crlf
 }
 
@@ -23,13 +24,33 @@ pub struct PacketResponse {
     pub total: usize,
 }
 
+fn append_suffix(mut data: Vec<u8>, suffix: Option<&str>) -> Vec<u8> {
+    match suffix {
+        Some("cr") => data.push(0x0D),
+        Some("lf") => data.push(0x0A),
+        Some("crlf") => {
+            data.push(0x0D);
+            data.push(0x0A);
+        }
+        _ => {}
+    }
+    data
+}
+
+fn encode_chinese(text: &str, encoding: &'static encoding_rs::Encoding) -> Result<Vec<u8>, String> {
+    let (cow, _enc, had_errors) = encoding.encode(text);
+    if had_errors {
+        return Err(format!("存在无法用 {} 编码的字符", encoding.name()));
+    }
+    Ok(cow.into_owned())
+}
+
 /// 发送数据到指定通道
 #[tauri::command]
 pub async fn send_data(
     request: SendDataRequest,
     state: State<'_, AppState>,
 ) -> Result<SendDataResponse, String> {
-    // 检查通道是否存在
     {
         let channels = state.channels.read().await;
         if !channels.contains_key(&request.channel_id) {
@@ -38,24 +59,30 @@ pub async fn send_data(
     }
 
     let bytes = match request.format.as_str() {
-        "hex" => hex::decode(&request.data).map_err(|e| format!("HEX 解析失败: {}", e))?,
-        "text" => {
-            let mut data = request.data.into_bytes();
-            match request.suffix.as_deref() {
-                Some("cr") => data.push(0x0D),
-                Some("lf") => data.push(0x0A),
-                Some("crlf") => { data.push(0x0D); data.push(0x0A); }
-                _ => {}
-            }
-            data
+        "hex" => {
+            let clean = request.data.replace([' ', '\t', '\n', '\r'], "");
+            hex::decode(&clean).map_err(|e| format!("HEX 解析失败: {}", e))?
         }
-        _ => return Err(format!("不支持的格式: {}", request.format)),
+        "text" | "utf-8" => {
+            append_suffix(request.data.into_bytes(), request.suffix.as_deref())
+        }
+        "gbk" => {
+            let mut raw = encode_chinese(&request.data, encoding_rs::GBK)?;
+            raw = append_suffix(raw, request.suffix.as_deref());
+            raw
+        }
+        "gb2312" => {
+            // GB2312 是 GBK 子集；encoding_rs 无独立 GB2312，用 GBK 编码并校验可表示性
+            let mut raw = encode_chinese(&request.data, encoding_rs::GBK)?;
+            raw = append_suffix(raw, request.suffix.as_deref());
+            raw
+        }
+        other => return Err(format!("不支持的格式: {}", other)),
     };
 
     let len = bytes.len();
     state.send_to_channel(&request.channel_id, &bytes).await?;
 
-    // 记录 TX 包
     let entry = PacketEntry {
         timestamp: chrono::Local::now().format("%H:%M:%S%.3f").to_string(),
         direction: "tx".to_string(),

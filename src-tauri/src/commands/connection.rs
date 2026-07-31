@@ -7,6 +7,28 @@ use std::sync::Arc;
 use transport::Transport;
 use transport::tcp::TcpServerTransport;
 
+fn emit_connection(
+    app: &AppHandle,
+    channel_id: String,
+    connected: bool,
+    transport_type: String,
+    port_name: String,
+    parent_channel_id: Option<String>,
+    server_clients: Option<Vec<String>>,
+) {
+    let _ = app.emit(
+        "connection-changed",
+        ConnectionEventPayload {
+            channel_id,
+            connected,
+            transport_type,
+            port_name,
+            parent_channel_id,
+            server_clients,
+        },
+    );
+}
+
 #[derive(serde::Deserialize)]
 pub struct ConnectRequest {
     pub conn_type: String, // serial / tcp_client / tcp_server
@@ -37,6 +59,14 @@ pub struct ConnectionStatusResponse {
     pub transport_type: String,
     pub port_name: String,
     pub clients: Vec<String>,
+    pub parent_channel_id: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+pub struct ServerClientInfo {
+    pub addr: String,
+    pub channel_id: String,
+    pub connected: bool,
 }
 
 /// 连接到设备 — 真实建立串口/TCP 连接并启动读线程
@@ -120,35 +150,34 @@ pub async fn connect(
             let channel_id = format!("tcp_server-{}:{}", bind_addr, port);
             let addr = format!("{}:{}", bind_addr, port);
 
-            // 保存具体类型用于客户端监控
             let server_arc = Arc::new(server);
             state.tcp_servers.write().await.insert(channel_id.clone(), server_arc.clone());
 
-            // 同时作为 dyn Transport 存入 channels
             let transport: Arc<dyn Transport> = server_arc.clone();
             state
                 .channels
                 .write()
                 .await
-                .insert(channel_id.clone(), transport.clone());
+                .insert(channel_id.clone(), transport);
 
-            state.spawn_reader(channel_id.clone(), transport).await;
+            // Server 自身不 spawn_reader：RX 由各客户端独占通道负责
 
-            // 启动客户端监控线程：检测新连接的客户端，创建独立通道
             let channels = state.channels.clone();
             let cancels = state.channel_cancels.clone();
             let readers = state.channel_readers.clone();
             let packets = state.packets.clone();
             let rx_tx = state.rx_broadcast.clone();
+            let packet_seq = state.packet_seq.clone();
             let log = state.logs.clone();
+            let parents = state.client_parents.clone();
             let rt = tokio::runtime::Handle::current();
             let monitor_server = server_arc.clone();
             let app_handle = app.clone();
+            let server_channel_id = channel_id.clone();
 
             std::thread::spawn(move || {
                 loop {
                     std::thread::sleep(std::time::Duration::from_millis(100));
-                    // 如果 server 已关闭，退出监控线程
                     if !monitor_server.is_active() {
                         break;
                     }
@@ -162,8 +191,11 @@ pub async fn connect(
 
                         let rt2 = rt.clone();
                         let channels2 = channels.clone();
+                        let parents2 = parents.clone();
+                        let server_id = server_channel_id.clone();
                         rt.block_on(async {
                             channels2.write().await.insert(client_id.clone(), client_transport.clone());
+                            parents2.write().await.insert(client_id.clone(), server_id);
                         });
 
                         let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -174,22 +206,41 @@ pub async fn connect(
 
                         let pkts = packets.clone();
                         let rx = rx_tx.clone();
+                        let seq_counter = packet_seq.clone();
                         let lg = log.clone();
                         let cid = client_id.clone();
                         let transport_ref = client_transport.clone();
 
-                        // 向前端推送新客户端连接事件
-                        let _ = app_handle.emit("connection-changed", ConnectionEventPayload {
-                            channel_id: client_id.clone(),
-                            connected: true,
-                            transport_type: "tcp_server_client".to_string(),
-                            port_name: format!("{}", addr),
-                        });
+                        let server_clients_now = monitor_server.client_info();
+                        emit_connection(
+                            &app_handle,
+                            client_id.clone(),
+                            true,
+                            "tcp_server_client".to_string(),
+                            format!("{}", addr),
+                            Some(server_channel_id.clone()),
+                            Some(server_clients_now.clone()),
+                        );
+                        emit_connection(
+                            &app_handle,
+                            server_channel_id.clone(),
+                            true,
+                            "tcp_server".to_string(),
+                            server_channel_id
+                                .strip_prefix("tcp_server-")
+                                .unwrap_or(&server_channel_id)
+                                .to_string(),
+                            None,
+                            Some(server_clients_now),
+                        );
 
                         let app_handle2 = app_handle.clone();
                         let channels3 = channels.clone();
                         let cancels3 = cancels.clone();
                         let readers3 = readers.clone();
+                        let parents3 = parents.clone();
+                        let server_ref = monitor_server.clone();
+                        let server_channel_id = server_channel_id.clone();
 
                         let handle = std::thread::spawn(move || {
                             let mut buf = [0u8; 4096];
@@ -222,10 +273,12 @@ pub async fn connect(
                                                 pkts.drain(..drain);
                                             }
                                         });
+                                        let seq = seq_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
                                         let _ = rx.send(crate::state::RxBroadcastEvent {
                                             channel_id: cid.clone(),
                                             bytes: data,
                                             timestamp: ts,
+                                            seq,
                                         });
                                     }
                                     Err(_) => {
@@ -233,18 +286,33 @@ pub async fn connect(
                                     }
                                 }
                             }
-                            // 客户端断开，清理通道并通知前端
+                            // 清理：踢出 server 写侧映射 + 移除通道
+                            let _ = server_ref.kick_client(addr);
                             rt2.block_on(async {
                                 channels3.write().await.remove(&cid);
                                 cancels3.write().await.remove(&cid);
                                 readers3.write().await.remove(&cid);
+                                parents3.write().await.remove(&cid);
                             });
-                            let _ = app_handle2.emit("connection-changed", ConnectionEventPayload {
-                                channel_id: cid.clone(),
-                                connected: false,
-                                transport_type: String::new(),
-                                port_name: String::new(),
-                            });
+                            let remaining = server_ref.client_info();
+                            emit_connection(
+                                &app_handle2,
+                                cid.clone(),
+                                false,
+                                "tcp_server_client".to_string(),
+                                format!("{}", addr),
+                                Some(server_channel_id.clone()),
+                                Some(remaining.clone()),
+                            );
+                            emit_connection(
+                                &app_handle2,
+                                server_channel_id.clone(),
+                                true,
+                                "tcp_server".to_string(),
+                                server_channel_id.strip_prefix("tcp_server-").unwrap_or(&server_channel_id).to_string(),
+                                None,
+                                Some(remaining),
+                            );
                             let lg2 = lg.clone();
                             rt2.block_on(async {
                                 lg2.lock().await.push(crate::state::LogEntry {
@@ -283,13 +351,7 @@ pub async fn connect(
         other => return Err(format!("不支持的连接类型: {}", other)),
     };
 
-    // 推送连接事件给前端
-    let _ = app.emit("connection-changed", ConnectionEventPayload {
-        channel_id: channel_id.clone(),
-        connected: true,
-        transport_type: kind,
-        port_name: addr,
-    });
+    emit_connection(&app, channel_id.clone(), true, kind, addr, None, None);
 
     Ok(ConnectResponse {
         success: true,
@@ -305,12 +367,15 @@ pub async fn disconnect(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<ConnectResponse, String> {
-    // 如果是 TCP Server，先断开所有子客户端通道
+    // TCP Server：只断开属于本 Server 的子客户端
     if channel_id.starts_with("tcp_server-") {
-        let child_ids: Vec<String> = state.channels.read().await
-            .keys()
-            .filter(|k| k.starts_with("tcp_client-"))
-            .cloned()
+        let child_ids: Vec<String> = state
+            .client_parents
+            .read()
+            .await
+            .iter()
+            .filter(|(_, parent)| *parent == &channel_id)
+            .map(|(id, _)| id.clone())
             .collect();
         for child_id in &child_ids {
             state.remove_channel(child_id).await;
@@ -319,10 +384,23 @@ pub async fn disconnect(
                 connected: false,
                 transport_type: String::new(),
                 port_name: String::new(),
+                parent_channel_id: None,
+                server_clients: None,
             });
         }
-        // 也从 tcp_servers 中移除
-        state.tcp_servers.write().await.remove(&channel_id);
+    }
+
+    // TCP Server 子客户端：同时从 server 写侧 map 踢出
+    if channel_id.starts_with("tcp_client-") {
+        if let Some(parent) = state.client_parents.read().await.get(&channel_id).cloned() {
+            if let Some(addr_str) = channel_id.strip_prefix("tcp_client-") {
+                if let Ok(addr) = addr_str.parse::<std::net::SocketAddr>() {
+                    if let Some(server) = state.tcp_servers.read().await.get(&parent) {
+                        server.kick_client(addr);
+                    }
+                }
+            }
+        }
     }
 
     state.remove_channel(&channel_id).await;
@@ -330,12 +408,13 @@ pub async fn disconnect(
         .log("info", "connection", &format!("{} 已断开", channel_id))
         .await;
 
-    // 推送断开事件给前端
     let _ = app.emit("connection-changed", ConnectionEventPayload {
         channel_id: channel_id.clone(),
         connected: false,
         transport_type: String::new(),
         port_name: String::new(),
+        parent_channel_id: None,
+        server_clients: None,
     });
 
     Ok(ConnectResponse {
@@ -345,6 +424,48 @@ pub async fn disconnect(
     })
 }
 
+/// 踢出 / 断开单个 TCP Server 客户端（语义同 disconnect(tcp_client-*)）
+#[tauri::command]
+pub async fn disconnect_client(
+    channel_id: String,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<ConnectResponse, String> {
+    if !channel_id.starts_with("tcp_client-") {
+        return Err("仅支持 tcp_server 子客户端通道".to_string());
+    }
+    disconnect(channel_id, state, app).await
+}
+
+/// 列出指定 TCP Server 的在线客户端
+#[tauri::command]
+pub async fn list_server_clients(
+    server_channel_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<ServerClientInfo>, String> {
+    let parents = state.client_parents.read().await;
+    let channels = state.channels.read().await;
+    let mut result = Vec::new();
+    for (client_id, parent) in parents.iter() {
+        if parent == &server_channel_id {
+            let connected = channels
+                .get(client_id)
+                .map(|t| t.is_active())
+                .unwrap_or(false);
+            let addr = client_id
+                .strip_prefix("tcp_client-")
+                .unwrap_or(client_id)
+                .to_string();
+            result.push(ServerClientInfo {
+                addr,
+                channel_id: client_id.clone(),
+                connected,
+            });
+        }
+    }
+    Ok(result)
+}
+
 /// 断开所有通道
 #[tauri::command]
 pub async fn disconnect_all(
@@ -352,16 +473,59 @@ pub async fn disconnect_all(
     app: AppHandle,
 ) -> Result<ConnectResponse, String> {
     let ids: Vec<String> = state.channels.read().await.keys().cloned().collect();
-    for id in &ids {
-        state.remove_channel(id).await;
-        // 逐个推送断开事件
+    let mut ordered = ids;
+    ordered.sort_by_key(|id| if id.starts_with("tcp_server-") { 0 } else { 1 });
+
+    for channel_id in ordered {
+        if !state.channels.read().await.contains_key(&channel_id) {
+            continue;
+        }
+
+        if channel_id.starts_with("tcp_server-") {
+            let child_ids: Vec<String> = state
+                .client_parents
+                .read()
+                .await
+                .iter()
+                .filter(|(_, parent)| *parent == &channel_id)
+                .map(|(id, _)| id.clone())
+                .collect();
+            for child_id in &child_ids {
+                state.remove_channel(child_id).await;
+                let _ = app.emit("connection-changed", ConnectionEventPayload {
+                    channel_id: child_id.clone(),
+                    connected: false,
+                    transport_type: String::new(),
+                    port_name: String::new(),
+                    parent_channel_id: None,
+                    server_clients: None,
+                });
+            }
+        }
+
+        if channel_id.starts_with("tcp_client-") {
+            if let Some(parent) = state.client_parents.read().await.get(&channel_id).cloned() {
+                if let Some(addr_str) = channel_id.strip_prefix("tcp_client-") {
+                    if let Ok(addr) = addr_str.parse::<std::net::SocketAddr>() {
+                        if let Some(server) = state.tcp_servers.read().await.get(&parent) {
+                            server.kick_client(addr);
+                        }
+                    }
+                }
+            }
+        }
+
+        state.remove_channel(&channel_id).await;
         let _ = app.emit("connection-changed", ConnectionEventPayload {
-            channel_id: id.clone(),
+            channel_id: channel_id.clone(),
             connected: false,
             transport_type: String::new(),
             port_name: String::new(),
+            parent_channel_id: None,
+            server_clients: None,
         });
     }
+
     state
         .log("info", "connection", "所有通道已断开")
         .await;
@@ -392,6 +556,7 @@ pub async fn get_connection_status(
     state: State<'_, AppState>,
 ) -> Result<Vec<ConnectionStatusResponse>, String> {
     let channels = state.channels.read().await;
+    let parents = state.client_parents.read().await;
     let mut result = Vec::new();
     for (id, transport) in channels.iter() {
         let desc = transport.descriptor();
@@ -401,6 +566,7 @@ pub async fn get_connection_status(
             transport_type: desc.kind.clone(),
             port_name: desc.address.clone(),
             clients: transport.client_info(),
+            parent_channel_id: parents.get(id).cloned(),
         });
     }
     Ok(result)

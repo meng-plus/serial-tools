@@ -24,6 +24,8 @@ pub fn run() {
             commands::connection::connect,
             commands::connection::disconnect,
             commands::connection::disconnect_all,
+            commands::connection::disconnect_client,
+            commands::connection::list_server_clients,
             commands::connection::list_ports,
             commands::connection::get_connection_status,
             // 数据收发

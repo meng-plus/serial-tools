@@ -23,6 +23,7 @@ describe('connectionStore', () => {
 
   it('should initialize with empty state', () => {
     const store = useConnectionStore()
+    expect(store.channelList).toEqual([])
     expect(store.channels.size).toBe(0)
     expect(store.ports).toEqual([])
     expect(store.hasConnection).toBe(false)
@@ -36,7 +37,7 @@ describe('connectionStore', () => {
 
     await store.refreshStatus()
 
-    expect(store.channels.size).toBe(1)
+    expect(store.channelList).toHaveLength(1)
     expect(store.channels.get('serial-COM3')).toBeDefined()
     expect(store.channels.get('serial-COM3')?.transportType).toBe('serial')
     expect(store.hasConnection).toBe(true)
@@ -69,26 +70,44 @@ describe('connectionStore', () => {
     expect(invoke).toHaveBeenCalledWith('connect', { request: { conn_type: 'serial', port: 'COM3', baud_rate: 115200 } })
   })
 
-  it('should disconnect channel', async () => {
+  it('should disconnect channel and clear local list', async () => {
     const store = useConnectionStore()
-    store.channels.set('ch1', { channelId: 'ch1', connected: true, transportType: 'serial', portName: 'COM3', clients: [] })
-    vi.mocked(invoke).mockResolvedValue({ success: true, message: 'ok', channel_id: 'ch1' })
+    store.channelList.push({
+      channelId: 'tcp_server-0.0.0.0:5000',
+      connected: true,
+      transportType: 'tcp_server',
+      portName: '0.0.0.0:5000',
+      clients: ['127.0.0.1:1'],
+    })
+    store.channelList.push({
+      channelId: 'tcp_client-127.0.0.1:1',
+      connected: true,
+      transportType: 'tcp_server_client',
+      portName: '127.0.0.1:1',
+      clients: [],
+      parentChannelId: 'tcp_server-0.0.0.0:5000',
+    })
+    vi.mocked(invoke)
+      .mockResolvedValueOnce({ success: true, message: 'ok', channel_id: 'tcp_server-0.0.0.0:5000' })
+      .mockResolvedValueOnce([])
 
-    await store.disconnect('ch1')
+    await store.disconnect('tcp_server-0.0.0.0:5000')
 
-    expect(store.channels.has('ch1')).toBe(false)
-    expect(invoke).toHaveBeenCalledWith('disconnect', { channelId: 'ch1' })
+    expect(store.channelList).toHaveLength(0)
+    expect(invoke).toHaveBeenCalledWith('disconnect', { channelId: 'tcp_server-0.0.0.0:5000' })
   })
 
   it('should disconnect all', async () => {
     const store = useConnectionStore()
-    store.channels.set('ch1', { channelId: 'ch1', connected: true, transportType: 'serial', portName: 'COM3', clients: [] })
-    store.channels.set('ch2', { channelId: 'ch2', connected: true, transportType: 'tcp_client', portName: '192.168.1.1:5000', clients: [] })
-    vi.mocked(invoke).mockResolvedValue({ success: true, message: 'ok', channel_id: '' })
+    store.channelList.push({ channelId: 'ch1', connected: true, transportType: 'serial', portName: 'COM3', clients: [] })
+    store.channelList.push({ channelId: 'ch2', connected: true, transportType: 'tcp_client', portName: '192.168.1.1:5000', clients: [] })
+    vi.mocked(invoke)
+      .mockResolvedValueOnce({ success: true, message: 'ok', channel_id: '' })
+      .mockResolvedValueOnce([])
 
     await store.disconnectAll()
 
-    expect(store.channels.size).toBe(0)
+    expect(store.channelList).toHaveLength(0)
   })
 
   it('should compute connectedChannels correctly', async () => {
@@ -102,5 +121,72 @@ describe('connectionStore', () => {
 
     expect(store.connectedChannels).toHaveLength(1)
     expect(store.connectedChannels[0].channelId).toBe('ch1')
+  })
+
+  it('should filter server clients by parent', () => {
+    const store = useConnectionStore()
+    store.channelList.push({
+      channelId: 'tcp_server-0.0.0.0:5000',
+      connected: true,
+      transportType: 'tcp_server',
+      portName: '0.0.0.0:5000',
+      clients: ['127.0.0.1:12345'],
+    })
+    store.channelList.push({
+      channelId: 'tcp_client-127.0.0.1:12345',
+      connected: true,
+      transportType: 'tcp_server_client',
+      portName: '127.0.0.1:12345',
+      clients: [],
+      parentChannelId: 'tcp_server-0.0.0.0:5000',
+    })
+    store.channelList.push({
+      channelId: 'tcp_client-127.0.0.1:9999',
+      connected: true,
+      transportType: 'tcp_server_client',
+      portName: '127.0.0.1:9999',
+      clients: [],
+      parentChannelId: 'tcp_server-0.0.0.0:6000',
+    })
+
+    const clients = store.getServerClients('tcp_server-0.0.0.0:5000')
+    expect(clients).toHaveLength(1)
+    expect(clients[0].channelId).toBe('tcp_client-127.0.0.1:12345')
+    expect(store.topLevelChannels).toHaveLength(1)
+  })
+
+  it('should fallback to server.clients when nested channel missing', () => {
+    const store = useConnectionStore()
+    store.channelList.push({
+      channelId: 'tcp_server-0.0.0.0:5000',
+      connected: true,
+      transportType: 'tcp_server',
+      portName: '0.0.0.0:5000',
+      clients: ['10.0.0.2:4000', '10.0.0.3:4001'],
+    })
+
+    const clients = store.getServerClients('tcp_server-0.0.0.0:5000')
+    expect(clients).toHaveLength(2)
+    expect(clients[0].channelId).toBe('tcp_client-10.0.0.2:4000')
+    expect(clients[0].parentChannelId).toBe('tcp_server-0.0.0.0:5000')
+  })
+
+  it('should disconnect client via disconnect_client', async () => {
+    const store = useConnectionStore()
+    store.channelList.push({
+      channelId: 'tcp_client-127.0.0.1:1',
+      connected: true,
+      transportType: 'tcp_server_client',
+      portName: '127.0.0.1:1',
+      clients: [],
+      parentChannelId: 'tcp_server-0.0.0.0:5000',
+    })
+    vi.mocked(invoke)
+      .mockResolvedValueOnce({ success: true, message: 'ok', channel_id: 'tcp_client-127.0.0.1:1' })
+      .mockResolvedValueOnce([])
+
+    await store.disconnectClient('tcp_client-127.0.0.1:1')
+    expect(invoke).toHaveBeenCalledWith('disconnect_client', { channelId: 'tcp_client-127.0.0.1:1' })
+    expect(store.channelList.find(c => c.channelId === 'tcp_client-127.0.0.1:1')).toBeUndefined()
   })
 })

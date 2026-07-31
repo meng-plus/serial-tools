@@ -6,7 +6,8 @@ export interface RxEventPayload {
   hex: string
   text: string
   timestamp: string
-  bytes: number[]  // backward compat, populated from bytes_hex
+  seq?: number
+  bytes?: number[]
 }
 
 export interface ConnectionEventPayload {
@@ -14,6 +15,8 @@ export interface ConnectionEventPayload {
   connected: boolean
   transport_type: string
   port_name: string
+  parent_channel_id?: string | null
+  server_clients?: string[] | null
 }
 
 export interface LogEventPayload {
@@ -28,24 +31,28 @@ type UnlistenFn = () => void
 let listenFn: typeof import('@tauri-apps/api/event').listen | null = null
 
 async function getListen() {
-  if (!listenFn && isTauri()) {
+  if (!isTauri()) return null
+  if (!listenFn) {
     const mod = await import('@tauri-apps/api/event')
     listenFn = mod.listen
   }
-  return listenFn!
+  return listenFn
 }
 
 export async function onRxData(handler: (payload: RxEventPayload) => void): Promise<UnlistenFn> {
   const listen = await getListen()
+  if (!listen) return () => {}
   return listen<RxEventPayload>('rx-data', (event) => handler(event.payload))
 }
 
 export async function onConnectionChanged(handler: (payload: ConnectionEventPayload) => void): Promise<UnlistenFn> {
   const listen = await getListen()
+  if (!listen) return () => {}
   return listen<ConnectionEventPayload>('connection-changed', (event) => handler(event.payload))
 }
 
 export async function onLogEntry(handler: (payload: LogEventPayload) => void): Promise<UnlistenFn> {
   const listen = await getListen()
+  if (!listen) return () => {}
   return listen<LogEventPayload>('log-entry', (event) => handler(event.payload))
 }

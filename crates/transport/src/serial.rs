@@ -90,6 +90,11 @@ impl Transport for SerialTransport {
         Ok(())
     }
 
+    fn shutdown(&self) -> Result<(), TransportError> {
+        *self.port.lock().unwrap() = None;
+        Ok(())
+    }
+
     fn write(&self, bytes: &[u8]) -> Result<usize, TransportError> {
         if self.config.half_duplex && self.receiving.load(Ordering::Acquire) {
             let deadline = Instant::now() + Duration::from_millis(100);
@@ -126,5 +131,13 @@ impl Transport for SerialTransport {
 
     fn descriptor(&self) -> &TransportDescriptor {
         &self.descriptor
+    }
+
+    fn duplex_mode(&self) -> DuplexMode {
+        if self.config.half_duplex {
+            DuplexMode::Half
+        } else {
+            DuplexMode::Full
+        }
     }
 }

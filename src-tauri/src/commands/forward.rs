@@ -1,17 +1,12 @@
 //! 数据总线命令 — 多通道共享数据管道
 //!
-//! 总线模型：
-//!   - create_bus: 创建命名总线
-//!   - subscribe_bus: 将通道订阅到总线（可选方向）
-//!   - unsubscribe_bus: 取消订阅
-//!   - list_buses: 列出所有总线
-//!   - stop_bus / delete_bus: 停止/删除总线
-//!
+//! RxToBus 订阅 AppState.rx_broadcast（单一读者原则），不直接 transport.read()。
 //! 点对点转发 = 2 个通道订阅同一总线（A:RxToBus, B:TxFromBus）
 //! 广播 = 1 个 RxToBus + N 个 TxFromBus
 
-use crate::state::{AppState, BusDirection, BusInfo, BusSubInfo, DataBus};
-use std::sync::atomic::{AtomicBool, Ordering};
+use crate::state::{AppState, BusDirection, BusInfo, BusSubInfo, BusSubscription, DataBus};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::State;
 
@@ -49,9 +44,10 @@ pub async fn create_bus(
         subscriptions: Vec::new(),
         bus_tx,
         cancel: Arc::new(AtomicBool::new(false)),
+        sub_cancels: HashMap::new(),
         threads: Vec::new(),
-        rx_bytes: 0,
-        tx_bytes: 0,
+        rx_bytes: Arc::new(AtomicU64::new(0)),
+        tx_bytes: Arc::new(AtomicU64::new(0)),
     };
 
     state.buses.write().await.insert(bus_id.clone(), bus);
@@ -72,7 +68,6 @@ pub async fn subscribe_bus(
     request: SubscribeBusRequest,
     state: State<'_, AppState>,
 ) -> Result<BusResponse, String> {
-    // 验证通道存在
     {
         let channels = state.channels.read().await;
         if !channels.contains_key(&request.channel_id) {
@@ -92,12 +87,14 @@ pub async fn subscribe_bus(
         .get_mut(&request.bus_id)
         .ok_or_else(|| format!("总线 {} 不存在", request.bus_id))?;
 
-    // 检查是否已订阅
+    if bus.cancel.load(Ordering::Relaxed) {
+        return Err("总线已停止，无法订阅".to_string());
+    }
+
     if bus.subscriptions.iter().any(|s| s.channel_id == request.channel_id) {
         return Err(format!("通道 {} 已订阅此总线", request.channel_id));
     }
 
-    // 获取通道 transport
     let channels = state.channels.read().await;
     let transport = channels
         .get(&request.channel_id)
@@ -108,35 +105,39 @@ pub async fn subscribe_bus(
     let channel_id = request.channel_id.clone();
     let bus_tx = bus.bus_tx.clone();
     let cancel = bus.cancel.clone();
+    let sub_cancel = Arc::new(AtomicBool::new(false));
+    bus.sub_cancels.insert(channel_id.clone(), sub_cancel.clone());
 
-    // RxToBus / Both: 启动读线程，将通道 RX 推送到总线
+    let rx_bytes = bus.rx_bytes.clone();
+    let tx_bytes = bus.tx_bytes.clone();
+
+    // RxToBus / Both: 订阅全局 RX 广播，按 channel_id 过滤后推入总线
     if direction == BusDirection::RxToBus || direction == BusDirection::Both {
-        let transport_clone = transport.clone();
+        let mut rx = state.rx_broadcast.subscribe();
         let bus_tx_clone = bus_tx.clone();
         let cancel_clone = cancel.clone();
+        let sub_cancel_clone = sub_cancel.clone();
         let cid = channel_id.clone();
+        let rx_counter = rx_bytes.clone();
 
         let handle = std::thread::spawn(move || {
-            let mut buf = [0u8; 4096];
             loop {
-                if cancel_clone.load(Ordering::Relaxed) {
+                if cancel_clone.load(Ordering::Relaxed) || sub_cancel_clone.load(Ordering::Relaxed) {
                     break;
                 }
-                match transport_clone.read(&mut buf) {
-                    Ok(0) => {
-                        let desc = transport_clone.descriptor();
-                        if desc.kind.starts_with("tcp") {
-                            break;
+                match rx.try_recv() {
+                    Ok(evt) => {
+                        if evt.channel_id == cid {
+                            let n = evt.bytes.len() as u64;
+                            let _ = bus_tx_clone.send(evt.bytes);
+                            rx_counter.fetch_add(n, Ordering::Relaxed);
                         }
+                    }
+                    Err(tokio::sync::broadcast::error::TryRecvError::Empty) => {
                         std::thread::sleep(std::time::Duration::from_millis(5));
                     }
-                    Ok(n) => {
-                        let data = buf[..n].to_vec();
-                        let _ = bus_tx_clone.send(data);
-                    }
-                    Err(_) => {
-                        std::thread::sleep(std::time::Duration::from_millis(10));
-                    }
+                    Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {}
+                    Err(tokio::sync::broadcast::error::TryRecvError::Closed) => break,
                 }
             }
             eprintln!("[bus] {} RxToBus 线程退出", cid);
@@ -149,28 +150,29 @@ pub async fn subscribe_bus(
         let transport_clone = transport.clone();
         let mut bus_rx = bus.bus_tx.subscribe();
         let cancel_clone = cancel.clone();
+        let sub_cancel_clone = sub_cancel.clone();
         let cid = channel_id.clone();
+        let tx_counter = tx_bytes.clone();
 
         let handle = std::thread::spawn(move || {
             loop {
-                if cancel_clone.load(Ordering::Relaxed) {
+                if cancel_clone.load(Ordering::Relaxed) || sub_cancel_clone.load(Ordering::Relaxed) {
                     break;
                 }
                 match bus_rx.try_recv() {
                     Ok(data) => {
+                        let n = data.len() as u64;
                         if let Err(e) = transport_clone.write(&data) {
                             eprintln!("[bus] 写入 {} 失败: {}", cid, e);
+                        } else {
+                            tx_counter.fetch_add(n, Ordering::Relaxed);
                         }
                     }
                     Err(tokio::sync::broadcast::error::TryRecvError::Empty) => {
                         std::thread::sleep(std::time::Duration::from_millis(5));
                     }
-                    Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {
-                        // 跳过滞后的数据
-                    }
-                    Err(tokio::sync::broadcast::error::TryRecvError::Closed) => {
-                        break;
-                    }
+                    Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {}
+                    Err(tokio::sync::broadcast::error::TryRecvError::Closed) => break,
                 }
             }
             eprintln!("[bus] {} TxFromBus 线程退出", cid);
@@ -178,7 +180,7 @@ pub async fn subscribe_bus(
         bus.threads.push(handle);
     }
 
-    bus.subscriptions.push(crate::state::BusSubscription {
+    bus.subscriptions.push(BusSubscription {
         channel_id: channel_id.clone(),
         direction: direction.clone(),
     });
@@ -189,8 +191,12 @@ pub async fn subscribe_bus(
         BusDirection::Both => "both",
     };
 
+    // 释放 buses 写锁后再记日志
+    let bus_name = bus.name.clone();
+    drop(buses);
+
     state
-        .log("info", "bus", &format!("通道 {} 订阅总线 [{}] ({})", channel_id, bus.name, dir_str))
+        .log("info", "bus", &format!("通道 {} 订阅总线 [{}] ({})", channel_id, bus_name, dir_str))
         .await;
 
     Ok(BusResponse {
@@ -212,10 +218,16 @@ pub async fn unsubscribe_bus(
         .get_mut(&bus_id)
         .ok_or_else(|| format!("总线 {} 不存在", bus_id))?;
 
+    if let Some(sub_cancel) = bus.sub_cancels.remove(&channel_id) {
+        sub_cancel.store(true, Ordering::Relaxed);
+    }
     bus.subscriptions.retain(|s| s.channel_id != channel_id);
 
+    let bus_name = bus.name.clone();
+    drop(buses);
+
     state
-        .log("info", "bus", &format!("通道 {} 取消订阅总线 [{}]", channel_id, bus.name))
+        .log("info", "bus", &format!("通道 {} 取消订阅总线 [{}]", channel_id, bus_name))
         .await;
 
     Ok(BusResponse {
@@ -253,8 +265,8 @@ pub async fn list_buses(
             } else {
                 "running".to_string()
             },
-            rx_bytes: b.rx_bytes,
-            tx_bytes: b.tx_bytes,
+            rx_bytes: b.rx_bytes.load(Ordering::Relaxed),
+            tx_bytes: b.tx_bytes.load(Ordering::Relaxed),
         })
         .collect())
 }
@@ -271,12 +283,19 @@ pub async fn stop_bus(
         .ok_or_else(|| format!("总线 {} 不存在", bus_id))?;
 
     bus.cancel.store(true, Ordering::Relaxed);
+    for (_, sc) in bus.sub_cancels.drain() {
+        sc.store(true, Ordering::Relaxed);
+    }
     for thread in bus.threads.drain(..) {
         let _ = thread.join();
     }
+    bus.subscriptions.clear();
+
+    let bus_name = bus.name.clone();
+    drop(buses);
 
     state
-        .log("info", "bus", &format!("总线 [{}] 已停止", bus.name))
+        .log("info", "bus", &format!("总线 [{}] 已停止", bus_name))
         .await;
 
     Ok(BusResponse {
@@ -302,6 +321,7 @@ pub async fn delete_bus(
     }
 
     let bus = buses.remove(&bus_id).unwrap();
+    drop(buses);
     state
         .log("info", "bus", &format!("总线 [{}] 已删除", bus.name))
         .await;

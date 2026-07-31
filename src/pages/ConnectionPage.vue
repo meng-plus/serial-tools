@@ -93,57 +93,64 @@
       <a-col :span="14">
         <a-card title="已连接通道" :bordered="false" size="small">
           <template #extra>
-            <a-button size="small" danger @click="handleDisconnectAll" :disabled="!connectionStore.hasConnection">
-              全部断开
-            </a-button>
+            <a-space>
+              <a-button size="small" @click="connectionStore.refreshStatus()">刷新</a-button>
+              <a-button size="small" danger @click="handleDisconnectAll" :disabled="!connectionStore.hasConnection">
+                全部断开
+              </a-button>
+            </a-space>
           </template>
-          <a-table
-            :columns="columns"
-            :data-source="channelList"
-            :pagination="false"
-            size="small"
-            row-key="channelId"
-          >
-            <template #bodyCell="{ column, record }">
-              <template v-if="column.key === 'status'">
-                <template v-if="record.transportType === 'tcp_server'">
-                  <a-badge status="success" v-if="record.connected" />
-                  <span v-if="record.connected">
-                    监听中
-                    <template v-if="record.clients && record.clients.length > 0">
-                      · <a-tag color="blue" size="small">{{ record.clients.length }} 客户端</a-tag>
-                    </template>
-                  </span>
-                  <a-badge status="error" text="断开" v-else />
-                </template>
-                <template v-else-if="record.transportType === 'tcp_server_client'">
-                  <a-badge status="success" text="在线" />
+
+          <div v-for="ch in topLevelChannels" :key="ch.channelId" class="channel-block">
+            <div class="channel-row">
+              <div class="channel-main">
+                <a-tag v-if="ch.transportType === 'tcp_server'">TCP 服务端</a-tag>
+                <a-tag v-else>{{ typeLabels[ch.transportType] || ch.transportType }}</a-tag>
+                <span class="channel-id">{{ ch.channelId }}</span>
+                <span class="channel-addr">{{ ch.portName }}</span>
+                <template v-if="ch.transportType === 'tcp_server'">
+                  <a-badge status="success" />
+                  <span>监听中</span>
+                  <a-tag v-if="clientCount(ch) > 0" color="blue">{{ clientCount(ch) }} 客户端</a-tag>
+                  <span v-else style="color: #999">等待连接...</span>
                 </template>
                 <template v-else>
-                  <a-badge status="success" text="已连接" v-if="record.connected" />
-                  <a-badge status="error" text="断开" v-else />
+                  <a-badge :status="ch.connected ? 'success' : 'error'" :text="ch.connected ? '已连接' : '断开'" />
                 </template>
-              </template>
-              <template v-if="column.key === 'clients'">
-                <template v-if="record.clients && record.clients.length > 0">
-                  <a-tag v-for="c in record.clients" :key="c" size="small" color="blue">{{ c }}</a-tag>
-                </template>
-                <span v-else-if="record.transportType === 'tcp_server'" style="color: #999">等待连接...</span>
-              </template>
-              <template v-if="column.key === 'action'">
+              </div>
+              <a-space>
+                <a-button size="small" @click="openTerminal(ch.channelId)">终端</a-button>
+                <a-button size="small" danger @click="handleDisconnect(ch.channelId)">断开</a-button>
+              </a-space>
+            </div>
+
+            <!-- TCP Server 在线客户端清单 -->
+            <div v-if="ch.transportType === 'tcp_server'" class="client-list">
+              <div class="client-list-title">在线客户端</div>
+              <div
+                v-for="client in connectionStore.getServerClients(ch.channelId)"
+                :key="client.channelId"
+                class="client-row"
+              >
+                <span class="client-indent">└</span>
+                <a-tag color="blue">客户端</a-tag>
+                <span class="channel-id">{{ client.portName || client.channelId }}</span>
+                <a-badge status="success" text="在线" />
                 <a-space>
-                  <a-button size="small" @click="openTerminal(record.channelId)">终端</a-button>
-                  <a-button size="small" danger @click="connectionStore.disconnect(record.channelId)">断开</a-button>
+                  <a-button size="small" type="link" @click="openTerminal(client.channelId)">终端</a-button>
+                  <a-button size="small" type="link" danger @click="handleKickClient(client.channelId)">断开</a-button>
                 </a-space>
-              </template>
-              <template v-if="column.key === 'type'">
-                <a-tag v-if="record.transportType === 'tcp_server'">TCP 服务端</a-tag>
-                <a-tag v-else-if="record.transportType === 'tcp_server_client'" color="blue">客户端</a-tag>
-                <a-tag v-else>{{ typeLabels[record.transportType] || record.transportType }}</a-tag>
-              </template>
-            </template>
-          </a-table>
-          <a-empty v-if="channelList.length === 0" description="暂无连接" />
+              </div>
+              <div
+                v-if="connectionStore.getServerClients(ch.channelId).length === 0"
+                class="client-row muted"
+              >
+                暂无客户端接入
+              </div>
+            </div>
+          </div>
+
+          <a-empty v-if="topLevelChannels.length === 0" description="暂无连接" />
         </a-card>
       </a-col>
     </a-row>
@@ -164,7 +171,7 @@ const connectionStore = useConnectionStore()
 const connecting = ref(false)
 
 const ports = computed(() => connectionStore.ports)
-const channelList = computed(() => Array.from(connectionStore.channels.values()))
+const topLevelChannels = computed(() => connectionStore.topLevelChannels)
 
 const baudRates = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
 
@@ -172,6 +179,11 @@ const typeLabels: Record<string, string> = {
   serial: '串口',
   tcp_client: 'TCP 客户端',
   tcp_server: 'TCP 服务端',
+}
+
+function clientCount(ch: { channelId: string; clients?: string[] }) {
+  const nested = connectionStore.getServerClients(ch.channelId).length
+  return nested || ch.clients?.length || 0
 }
 
 function loadSavedForm() {
@@ -211,15 +223,6 @@ const form = reactive({
   tcp_port: saved?.tcp_port || 5000,
 })
 
-const columns = [
-  { title: '通道 ID', dataIndex: 'channelId', width: 200 },
-  { title: '类型', key: 'type', width: 100 },
-  { title: '地址', dataIndex: 'portName', width: 150 },
-  { title: '客户端', key: 'clients', width: 200 },
-  { title: '状态', key: 'status', width: 80 },
-  { title: '操作', key: 'action', width: 130 },
-]
-
 async function handleConnect() {
   connecting.value = true
   saveForm()
@@ -242,6 +245,24 @@ async function handleConnect() {
   }
 }
 
+async function handleDisconnect(channelId: string) {
+  try {
+    await connectionStore.disconnect(channelId)
+    message.success('已断开')
+  } catch (e: any) {
+    message.error(String(e))
+  }
+}
+
+async function handleKickClient(channelId: string) {
+  try {
+    await connectionStore.disconnectClient(channelId)
+    message.success('客户端已断开')
+  } catch (e: any) {
+    message.error(String(e))
+  }
+}
+
 async function handleDisconnectAll() {
   await connectionStore.disconnectAll()
   message.success('已断开所有通道')
@@ -255,3 +276,58 @@ onMounted(() => {
   saveForm()
 })
 </script>
+
+<style scoped>
+.channel-block {
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+.channel-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.channel-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.channel-id {
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 12px;
+}
+.channel-addr {
+  color: #888;
+  font-size: 12px;
+}
+.client-list {
+  margin-top: 8px;
+  padding-left: 8px;
+  border-left: 2px solid #e6f4ff;
+}
+.client-list-title {
+  font-size: 12px;
+  color: #8c8c8c;
+  margin-bottom: 4px;
+}
+.client-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+.client-indent {
+  color: #1677ff;
+  width: 16px;
+}
+.client-row.muted {
+  color: #999;
+  font-size: 12px;
+}
+</style>
