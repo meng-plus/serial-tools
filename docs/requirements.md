@@ -185,18 +185,26 @@ Transport.read() → 读线程 → packets 缓冲 + rx_broadcast 广播
 ## 7. 实施进度
 
 ### ✅ 已完成
-- [x] Transport trait + Serial/TCP/MQTT/Mock 实现
+- [x] Transport trait + Serial/TCP Client/TCP Server/Mock 实现
+- [x] TCP Server 多客户端独立通道（独立读线程、独立通道 ID）
+- [x] TCP Server 客户端实时连接/断开事件通知
+- [x] TCP Server 断开时自动清理所有子客户端通道
 - [x] 独立读线程 + broadcast 广播
 - [x] AppState 多通道管理
-- [x] 转发器框架
+- [x] 转发器框架（单向/双向）
 - [x] Tauri 命令层（connection/data/forward/protocol/log/config）
-- [x] Vue 前端 6 页面（Connection/Terminal/Forward/Protocol/Log/Settings）
+- [x] Vue 前端 7 页面（Connection/Terminal/Forward/Protocol/Log/Settings/About）
+- [x] 终端页面支持 TCP Server 客户端单独选择与发送
+- [x] 前端编码切换（UTF8/GBK/HEX）
+- [x] Framer 分帧器（超时断包、定界符、长度前缀）
+- [x] 事件桥接层（broadcast → Tauri emit，hex 字符串传输）
 - [x] 单元测试 + 集成测试（42 项通过）
 
 ### 📋 待完善
 - [ ] RS485 半双工互斥控制（硬件层面，当前未限制发送时机）
-- [ ] TCP Server 多客户端独立通道（当前仅 TCP Client）
-- [ ] 超时断包参数可配置化
+- [ ] MQTT 传输层实现（当前仅占位）
+- [ ] UDP 传输层实现
+- [ ] 超时断包参数可配置化（前端设置页）
 - [ ] 日志录制 BIN/CSV/HEX 格式
-- [ ] 前端编码切换（UTF8/GBK/HEX）
-- [ ] 转发器面板 UI 完善
+- [ ] 协议解析实际实现（Modbus RTU/TCP、JSON、正则）
+- [ ] 转发器面板 UI 完善（统计、状态实时更新）

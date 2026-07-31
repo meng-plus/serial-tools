@@ -65,7 +65,7 @@ import zhCN from 'ant-design-vue/es/locale/zh_CN'
 import {
   LinkOutlined, CodeOutlined, BugOutlined, SwapOutlined,
   FileTextOutlined, SettingOutlined, MenuUnfoldOutlined,
-  MenuFoldOutlined, ApiOutlined,
+  MenuFoldOutlined, ApiOutlined, InfoCircleOutlined,
 } from '@ant-design/icons-vue'
 import { useConnectionStore, useTerminalStore, useLogStore } from './stores'
 import { isTauri } from './api/tauri'
@@ -86,6 +86,7 @@ const menuItems = [
   { key: 'forward', label: '端口转发', icon: SwapOutlined },
   { key: 'log', label: '系统日志', icon: FileTextOutlined },
   { key: 'settings', label: '设置', icon: SettingOutlined },
+  { key: 'about', label: '关于', icon: InfoCircleOutlined },
 ]
 
 const selectedKeys = computed(() => [route.name as string])

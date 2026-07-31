@@ -8,6 +8,7 @@ const routes = [
   { path: '/forward', name: 'forward', component: () => import('@/pages/ForwardPage.vue'), meta: { title: '端口转发' } },
   { path: '/log', name: 'log', component: () => import('@/pages/LogPage.vue'), meta: { title: '系统日志' } },
   { path: '/settings', name: 'settings', component: () => import('@/pages/SettingsPage.vue'), meta: { title: '设置' } },
+  { path: '/about', name: 'about', component: () => import('@/pages/AboutPage.vue'), meta: { title: '关于' } },
 ]
 
 export const router = createRouter({

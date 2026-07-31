@@ -40,10 +40,14 @@ export const useTerminalStore = defineStore('terminal', () => {
     const selected = activeChannelId.value
     // TCP Server 通道过滤：显示 server 自身及其所有 client 的数据
     if (selected.startsWith('tcp_server-')) {
-      const prefix = selected.replace('tcp_server-', 'tcp_client-')
+      const prefix = 'tcp_client-'
       return lines.value.filter(l =>
         l.channelId === selected || l.channelId.startsWith(prefix)
       )
+    }
+    // 选中具体 TCP Server 客户端：只显示该客户端数据
+    if (selected.startsWith('tcp_client-')) {
+      return lines.value.filter(l => l.channelId === selected)
     }
     return lines.value.filter(l => l.channelId === selected)
   })
@@ -67,7 +71,9 @@ export const useTerminalStore = defineStore('terminal', () => {
     } catch { /* ignore */ }
 
     unlisten = await onRxData((payload: RxEventPayload) => {
-      addLine('rx', payload.channel_id, payload.hex, payload.text, payload.bytes, payload.timestamp)
+      // 从 bytes_hex 解析原始字节（后端发送 hex 字符串，避免序列化歧义）
+      const rawBytes = hexToBytes(payload.bytes_hex || payload.hex)
+      addLine('rx', payload.channel_id, payload.hex, payload.text, rawBytes, payload.timestamp)
     })
   }
 
@@ -132,6 +138,15 @@ export const useTerminalStore = defineStore('terminal', () => {
   async function clear() {
     await invoke('clear_packets')
     lines.value = []
+  }
+
+  function hexToBytes(hex: string): number[] {
+    const clean = hex.replace(/\s+/g, '')
+    const bytes: number[] = []
+    for (let i = 0; i < clean.length; i += 2) {
+      bytes.push(parseInt(clean.substring(i, i + 2), 16))
+    }
+    return bytes
   }
 
   return {

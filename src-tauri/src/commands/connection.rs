@@ -143,6 +143,7 @@ pub async fn connect(
             let log = state.logs.clone();
             let rt = tokio::runtime::Handle::current();
             let monitor_server = server_arc.clone();
+            let app_handle = app.clone();
 
             std::thread::spawn(move || {
                 loop {
@@ -172,6 +173,19 @@ pub async fn connect(
                         let lg = log.clone();
                         let cid = client_id.clone();
                         let transport_ref = client_transport.clone();
+
+                        // 向前端推送新客户端连接事件
+                        let _ = app_handle.emit("connection-changed", ConnectionEventPayload {
+                            channel_id: client_id.clone(),
+                            connected: true,
+                            transport_type: "tcp_server_client".to_string(),
+                            port_name: format!("{}", addr),
+                        });
+
+                        let app_handle2 = app_handle.clone();
+                        let channels3 = channels.clone();
+                        let cancels3 = cancels.clone();
+                        let readers3 = readers.clone();
 
                         let handle = std::thread::spawn(move || {
                             let mut buf = [0u8; 4096];
@@ -215,6 +229,18 @@ pub async fn connect(
                                     }
                                 }
                             }
+                            // 客户端断开，清理通道并通知前端
+                            rt2.block_on(async {
+                                channels3.write().await.remove(&cid);
+                                cancels3.write().await.remove(&cid);
+                                readers3.write().await.remove(&cid);
+                            });
+                            let _ = app_handle2.emit("connection-changed", ConnectionEventPayload {
+                                channel_id: cid.clone(),
+                                connected: false,
+                                transport_type: String::new(),
+                                port_name: String::new(),
+                            });
                             let lg2 = lg.clone();
                             rt2.block_on(async {
                                 lg2.lock().await.push(crate::state::LogEntry {
@@ -275,6 +301,26 @@ pub async fn disconnect(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<ConnectResponse, String> {
+    // 如果是 TCP Server，先断开所有子客户端通道
+    if channel_id.starts_with("tcp_server-") {
+        let child_ids: Vec<String> = state.channels.read().await
+            .keys()
+            .filter(|k| k.starts_with("tcp_client-"))
+            .cloned()
+            .collect();
+        for child_id in &child_ids {
+            state.remove_channel(child_id).await;
+            let _ = app.emit("connection-changed", ConnectionEventPayload {
+                channel_id: child_id.clone(),
+                connected: false,
+                transport_type: String::new(),
+                port_name: String::new(),
+            });
+        }
+        // 也从 tcp_servers 中移除
+        state.tcp_servers.write().await.remove(&channel_id);
+    }
+
     state.remove_channel(&channel_id).await;
     state
         .log("info", "connection", &format!("{} 已断开", channel_id))

@@ -105,12 +105,24 @@
             row-key="channelId"
           >
             <template #bodyCell="{ column, record }">
-              <template v-if="column.key === 'type'">
-                <a-tag>{{ typeLabels[record.transportType] || record.transportType }}</a-tag>
-              </template>
               <template v-if="column.key === 'status'">
-                <a-badge status="success" text="已连接" v-if="record.connected" />
-                <a-badge status="error" text="断开" v-else />
+                <template v-if="record.transportType === 'tcp_server'">
+                  <a-badge status="success" v-if="record.connected" />
+                  <span v-if="record.connected">
+                    监听中
+                    <template v-if="record.clients && record.clients.length > 0">
+                      · <a-tag color="blue" size="small">{{ record.clients.length }} 客户端</a-tag>
+                    </template>
+                  </span>
+                  <a-badge status="error" text="断开" v-else />
+                </template>
+                <template v-else-if="record.transportType === 'tcp_server_client'">
+                  <a-badge status="success" text="在线" />
+                </template>
+                <template v-else>
+                  <a-badge status="success" text="已连接" v-if="record.connected" />
+                  <a-badge status="error" text="断开" v-else />
+                </template>
               </template>
               <template v-if="column.key === 'clients'">
                 <template v-if="record.clients && record.clients.length > 0">
@@ -123,6 +135,11 @@
                   <a-button size="small" @click="openTerminal(record.channelId)">终端</a-button>
                   <a-button size="small" danger @click="connectionStore.disconnect(record.channelId)">断开</a-button>
                 </a-space>
+              </template>
+              <template v-if="column.key === 'type'">
+                <a-tag v-if="record.transportType === 'tcp_server'">TCP 服务端</a-tag>
+                <a-tag v-else-if="record.transportType === 'tcp_server_client'" color="blue">客户端</a-tag>
+                <a-tag v-else>{{ typeLabels[record.transportType] || record.transportType }}</a-tag>
               </template>
             </template>
           </a-table>

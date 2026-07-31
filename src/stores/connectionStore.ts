@@ -25,6 +25,19 @@ export const useConnectionStore = defineStore('connection', () => {
   )
   const hasConnection = computed(() => connectedChannels.value.length > 0)
 
+  // TCP Server 列表（不含客户端子通道）
+  const serverChannels = computed(() =>
+    Array.from(channels.value.values()).filter(c => c.transportType === 'tcp_server')
+  )
+
+  // 获取某个 TCP Server 的客户端通道
+  function getServerClients(serverChannelId: string): ChannelInfo[] {
+    const prefix = 'tcp_client-'
+    return Array.from(channels.value.values()).filter(
+      c => c.transportType === 'tcp_server_client' && c.channelId.startsWith(prefix)
+    )
+  }
+
   let unlisten: (() => void) | null = null
   let refreshTimer: ReturnType<typeof setInterval> | null = null
 
@@ -92,15 +105,25 @@ export const useConnectionStore = defineStore('connection', () => {
       port_name: string
       clients: string[]
     }>>('get_connection_status')
-    channels.value.clear()
+    // 合并而非清空：保留由 onConnectionChanged 实时更新的 tcp_server_client 条目
+    const existingClientIds = new Set<string>()
     for (const s of status) {
+      const existing = channels.value.get(s.channel_id)
       channels.value.set(s.channel_id, {
         channelId: s.channel_id,
         connected: s.connected,
-        transportType: s.transport_type,
+        transportType: existing?.transportType || s.transport_type,
         portName: s.port_name,
         clients: s.clients || [],
       })
+      existingClientIds.add(s.channel_id)
+    }
+    // 移除后端已不存在、且不是由 connection-changed 事件实时管理的客户端通道
+    // （tcp_server_client 由事件管理，此处不删除）
+    for (const [id, info] of channels.value) {
+      if (!existingClientIds.has(id) && info.transportType !== 'tcp_server_client') {
+        channels.value.delete(id)
+      }
     }
   }
 
@@ -109,7 +132,8 @@ export const useConnectionStore = defineStore('connection', () => {
   }
 
   return {
-    channels, ports, connectedChannels, hasConnection,
+    channels, ports, connectedChannels, hasConnection, serverChannels,
+    getServerClients,
     init, dispose, connect, disconnect, disconnectAll, refreshStatus, loadPorts,
   }
 })

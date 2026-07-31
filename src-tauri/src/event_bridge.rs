@@ -10,7 +10,8 @@ use tokio::sync::broadcast;
 #[derive(Clone, serde::Serialize)]
 pub struct RxEventPayload {
     pub channel_id: String,
-    pub bytes: Vec<u8>,
+    /// 原始字节的 hex 编码（与 hex 字段相同，用于前端解码）
+    pub bytes_hex: String,
     pub hex: String,
     pub text: String,
     pub timestamp: String,
@@ -32,11 +33,12 @@ pub fn start_event_bridge(app: AppHandle, rx_sender: broadcast::Sender<RxBroadca
         loop {
             match rx.blocking_recv() {
                 Ok(event) => {
+                    let hex_str = hex::encode(&event.bytes);
                     let payload = RxEventPayload {
                         channel_id: event.channel_id,
-                        hex: hex::encode(&event.bytes),
+                        hex: hex_str.clone(),
+                        bytes_hex: hex_str,
                         text: String::from_utf8_lossy(&event.bytes).to_string(),
-                        bytes: event.bytes,
                         timestamp: event.timestamp,
                     };
                     let _ = app.emit("rx-data", payload);

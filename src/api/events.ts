@@ -2,10 +2,11 @@ import { isTauri } from './tauri'
 
 export interface RxEventPayload {
   channel_id: string
-  bytes: number[]
+  bytes_hex: string
   hex: string
   text: string
   timestamp: string
+  bytes: number[]  // backward compat, populated from bytes_hex
 }
 
 export interface ConnectionEventPayload {

@@ -2,13 +2,28 @@
   <div class="terminal-page">
     <div class="terminal-toolbar">
       <a-space>
-        <a-select v-model:value="terminalStore.activeChannelId" style="width: 200px" placeholder="全部通道" allowClear>
+        <a-select v-model:value="terminalStore.activeChannelId" style="width: 280px" placeholder="全部通道" allowClear>
           <a-select-option value="">全部通道</a-select-option>
-          <a-select-option v-for="ch in allChannels" :key="ch.channelId" :value="ch.channelId">
-            <template v-if="ch.transportType === 'tcp_server'">{{ ch.channelId }} (服务端)</template>
-            <template v-else-if="ch.transportType === 'tcp_client' && ch.channelId.startsWith('tcp_client-')">{{ ch.channelId }} (客户端)</template>
-            <template v-else>{{ ch.channelId }}</template>
-          </a-select-option>
+          <template v-for="ch in allChannels" :key="ch.channelId">
+            <!-- TCP Server：显示服务端本身 -->
+            <template v-if="ch.transportType === 'tcp_server'">
+              <a-select-option :value="ch.channelId">
+                🖧 {{ ch.channelId }} ({{ ch.clients?.length || 0 }} 客户端)
+              </a-select-option>
+            </template>
+            <!-- TCP Server 客户端子通道：缩进显示 -->
+            <template v-else-if="ch.transportType === 'tcp_server_client'">
+              <a-select-option :value="ch.channelId">
+                &nbsp;&nbsp;└ {{ ch.portName }} (客户端)
+              </a-select-option>
+            </template>
+            <!-- 其他通道 -->
+            <template v-else>
+              <a-select-option :value="ch.channelId">
+                {{ ch.channelId }}
+              </a-select-option>
+            </template>
+          </template>
         </a-select>
 
         <a-segmented v-model:value="terminalStore.encoding" :options="[
@@ -129,9 +144,15 @@ const sendHex = ref('')
 const sendSuffix = ref('none')
 const autoScroll = ref(true)
 
-// 所有通道（包括 TCP Server 的客户端子通道）
-const allChannels = computed(() => Array.from(connectionStore.channels.values()))
+// 所有通道（按类型排序：先显示 TCP Server，紧跟其客户端，再显示其他）
+const allChannels = computed(() => {
+  const list = Array.from(connectionStore.channels.values())
+  // 已在 connectionStore.refreshStatus 中按插入顺序排列，无需额外排序
+  return list
+})
+
 const connectedChannels = computed(() => connectionStore.connectedChannels)
+
 const selectedChannel = computed(() => {
   const queryChannel = route.query.channel as string
   if (queryChannel) return queryChannel
