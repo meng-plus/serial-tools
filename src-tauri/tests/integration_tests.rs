@@ -613,3 +613,155 @@ async fn test_forward_serial_to_tcp_mock() {
     assert_eq!(tx_log.len(), 1);
     assert_eq!(tx_log[0], b"cmd:set");
 }
+
+// ══════════════════════════════════════════════════════════════
+// L5: 事件桥接测试
+// ══════════════════════════════════════════════════════════════
+
+/// 测试 log_broadcast 广播机制
+#[tokio::test]
+async fn test_log_broadcast() {
+    let state = serial_tools_lib::state::AppState::default();
+    let mut rx = state.log_broadcast.subscribe();
+
+    state.log("info", "test", "log message 1").await;
+    state.log("error", "test", "log message 2").await;
+
+    let entry1 = rx.recv().await.unwrap();
+    assert_eq!(entry1.level, "info");
+    assert_eq!(entry1.message, "log message 1");
+
+    let entry2 = rx.recv().await.unwrap();
+    assert_eq!(entry2.level, "error");
+    assert_eq!(entry2.message, "log message 2");
+}
+
+/// 测试 rx_broadcast 多订阅者
+#[tokio::test]
+async fn test_rx_broadcast_multi_subscriber() {
+    let state = serial_tools_lib::state::AppState::default();
+    let mut rx1 = state.rx_broadcast.subscribe();
+    let mut rx2 = state.rx_broadcast.subscribe();
+
+    let event = serial_tools_lib::state::RxBroadcastEvent {
+        channel_id: "ch1".to_string(),
+        bytes: b"multi".to_vec(),
+        timestamp: "12:00:00.000".to_string(),
+    };
+    state.rx_broadcast.send(event).unwrap();
+
+    // 两个订阅者都应该收到
+    let r1 = rx1.recv().await.unwrap();
+    let r2 = rx2.recv().await.unwrap();
+    assert_eq!(r1.bytes, b"multi");
+    assert_eq!(r2.bytes, b"multi");
+}
+
+/// 测试 AppState log 同时写入 logs 和 log_broadcast
+#[tokio::test]
+async fn test_log_writes_to_both_logs_and_broadcast() {
+    let state = serial_tools_lib::state::AppState::default();
+    let mut rx = state.log_broadcast.subscribe();
+
+    state.log("warn", "system", "warning msg").await;
+
+    // 验证写入 logs
+    let logs = state.logs.lock().await;
+    assert_eq!(logs.len(), 1);
+    assert_eq!(logs[0].level, "warn");
+    drop(logs);
+
+    // 验证广播
+    let entry = rx.recv().await.unwrap();
+    assert_eq!(entry.level, "warn");
+    assert_eq!(entry.source, "system");
+}
+
+// ══════════════════════════════════════════════════════════════
+// L6: TcpServerTransport 集成测试
+// ══════════════════════════════════════════════════════════════
+
+/// TCP Server 多客户端并发读写
+#[tokio::test]
+async fn test_tcp_server_multi_client_concurrent() {
+    use std::io::{Read, Write};
+    use transport::tcp::TcpServerTransport;
+    use transport::Transport;
+
+    let mut server = TcpServerTransport::new("127.0.0.1".to_string(), 0);
+    server.open().unwrap();
+    let port = server.bound_port().unwrap();
+
+    // 连接两个客户端
+    let mut c1 = TcpStream::connect(format!("127.0.0.1:{}", port)).unwrap();
+    let mut c2 = TcpStream::connect(format!("127.0.0.1:{}", port)).unwrap();
+    c1.set_read_timeout(Some(std::time::Duration::from_millis(500))).unwrap();
+    c2.set_read_timeout(Some(std::time::Duration::from_millis(500))).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    // 客户端1发送数据
+    c1.write_all(b"from c1").unwrap();
+    c1.flush().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    // 服务端读取
+    let mut buf = [0u8; 64];
+    let n = server.read(&mut buf).unwrap();
+    assert_eq!(&buf[..n], b"from c1");
+
+    // 客户端2发送数据
+    c2.write_all(b"from c2").unwrap();
+    c2.flush().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    let n = server.read(&mut buf).unwrap();
+    assert_eq!(&buf[..n], b"from c2");
+
+    // 服务端广播回复
+    server.write(b"reply all").unwrap();
+
+    let n1 = c1.read(&mut buf).unwrap();
+    assert_eq!(&buf[..n1], b"reply all");
+    let n2 = c2.read(&mut buf).unwrap();
+    assert_eq!(&buf[..n2], b"reply all");
+
+    server.close().unwrap();
+}
+
+/// TCP Server take_new_clients 提取后不影响已有客户端
+#[tokio::test]
+async fn test_tcp_server_take_new_clients_preserves_existing() {
+    use transport::tcp::TcpServerTransport;
+    use transport::Transport;
+
+    let mut server = TcpServerTransport::new("127.0.0.1".to_string(), 0);
+    server.open().unwrap();
+    let port = server.bound_port().unwrap();
+
+    // 连接客户端
+    let _c1 = TcpStream::connect(format!("127.0.0.1:{}", port)).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(200));
+
+    // 提取新客户端
+    let new = server.take_new_clients();
+    assert_eq!(new.len(), 1);
+
+    // 已有客户端仍然存在
+    assert_eq!(server.get_clients().len(), 1);
+    assert_eq!(server.client_info().len(), 1);
+
+    // 再连接一个
+    let _c2 = TcpStream::connect(format!("127.0.0.1:{}", port)).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(200));
+
+    // 再次提取应该只有新客户端
+    let new = server.take_new_clients();
+    assert_eq!(new.len(), 1);
+
+    // 总共两个客户端
+    assert_eq!(server.get_clients().len(), 2);
+
+    server.close().unwrap();
+}
+
+use std::net::TcpStream;
