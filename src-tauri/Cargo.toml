@@ -28,6 +28,9 @@ serialport = "4"
 uuid = { version = "1", features = ["v4"] }
 transport.workspace = true
 
+[dev-dependencies]
+tempfile = "3"
+
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]

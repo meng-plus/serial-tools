@@ -2,6 +2,7 @@
 
 pub mod commands;
 pub mod state;
+pub mod logger;
 
 use state::AppState;
 

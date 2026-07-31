@@ -14,6 +14,7 @@ impl MqttTransport {
         let descriptor = TransportDescriptor {
             kind: "mqtt".to_string(),
             address: format!("{}:{}", broker, port),
+            ..Default::default()
         };
         Self { descriptor, active: false }
     }

@@ -7,11 +7,12 @@ use transport::Transport;
 
 #[derive(serde::Deserialize)]
 pub struct ConnectRequest {
-    pub conn_type: String, // serial / tcp_client
+    pub conn_type: String, // serial / tcp_client / tcp_server
     pub port: Option<String>,
     pub baud_rate: Option<u32>,
     pub host: Option<String>,
     pub tcp_port: Option<u16>,
+    pub half_duplex: Option<bool>,
 }
 
 #[derive(serde::Serialize)]
@@ -45,6 +46,7 @@ pub async fn connect(
         "serial" => {
             let port = request.port.ok_or("请选择串口")?;
             let baud_rate = request.baud_rate.unwrap_or(115200);
+            let half_duplex = request.half_duplex.unwrap_or(false);
 
             let config = transport::serial::SerialConfig {
                 port: port.clone(),
@@ -52,6 +54,7 @@ pub async fn connect(
                 data_bits: 8,
                 stop_bits: 1,
                 parity: "None".to_string(),
+                half_duplex,
             };
             let mut transport = transport::serial::SerialTransport::new(config);
             transport
@@ -97,6 +100,32 @@ pub async fn connect(
 
             state
                 .log("info", "connection", &format!("TCP {}:{} 已连接", host, port))
+                .await;
+
+            channel_id
+        }
+        "tcp_server" => {
+            let bind_addr = request.host.unwrap_or_else(|| "0.0.0.0".to_string());
+            let port = request.tcp_port.ok_or("请输入监听端口")?;
+
+            let mut transport = transport::tcp::TcpServerTransport::new(bind_addr.clone(), port);
+            transport
+                .open()
+                .map_err(|e| format!("TCP Server 启动失败: {}", e))?;
+
+            let channel_id = format!("tcp_server-{}:{}", bind_addr, port);
+            let transport: Arc<dyn Transport> = Arc::new(transport);
+            state
+                .channels
+                .write()
+                .await
+                .insert(channel_id.clone(), transport.clone());
+
+            // 启动读线程
+            state.spawn_reader(channel_id.clone(), transport).await;
+
+            state
+                .log("info", "connection", &format!("TCP Server 监听 {}:{} 已就绪", bind_addr, port))
                 .await;
 
             channel_id

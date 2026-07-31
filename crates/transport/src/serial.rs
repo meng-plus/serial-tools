@@ -1,12 +1,15 @@
 //! 串口传输层实现
 
 use super::*;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 pub struct SerialTransport {
     port: Mutex<Option<Box<dyn serialport::SerialPort>>>,
     descriptor: TransportDescriptor,
     config: SerialConfig,
+    receiving: AtomicBool,
 }
 
 #[derive(Debug, Clone)]
@@ -16,6 +19,7 @@ pub struct SerialConfig {
     pub data_bits: u8,
     pub stop_bits: u8,
     pub parity: String,
+    pub half_duplex: bool,
 }
 
 impl SerialTransport {
@@ -23,11 +27,13 @@ impl SerialTransport {
         let descriptor = TransportDescriptor {
             kind: "serial".to_string(),
             address: config.port.clone(),
+            half_duplex: config.half_duplex,
         };
         Self {
             port: Mutex::new(None),
             descriptor,
             config,
+            receiving: AtomicBool::new(false),
         }
     }
 
@@ -85,15 +91,33 @@ impl Transport for SerialTransport {
     }
 
     fn write(&self, bytes: &[u8]) -> Result<usize, TransportError> {
+        if self.config.half_duplex && self.receiving.load(Ordering::Acquire) {
+            let deadline = Instant::now() + Duration::from_millis(100);
+            while self.receiving.load(Ordering::Acquire) {
+                if Instant::now() >= deadline {
+                    return Err(TransportError::Send("RS485 半双工: 读取中无法发送，超时".to_string()));
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
         let mut guard = self.port.lock().unwrap();
         let port = guard.as_mut().ok_or(TransportError::NotConnected)?;
         port.write(bytes).map_err(|e| TransportError::Send(e.to_string()))
     }
 
     fn read(&self, buf: &mut [u8]) -> Result<usize, TransportError> {
-        let mut guard = self.port.lock().unwrap();
-        let port = guard.as_mut().ok_or(TransportError::NotConnected)?;
-        port.read(buf).map_err(|e| TransportError::Receive(e.to_string()))
+        if self.config.half_duplex {
+            self.receiving.store(true, Ordering::Release);
+        }
+        let result = {
+            let mut guard = self.port.lock().unwrap();
+            let port = guard.as_mut().ok_or(TransportError::NotConnected)?;
+            port.read(buf).map_err(|e| TransportError::Receive(e.to_string()))
+        };
+        if self.config.half_duplex {
+            self.receiving.store(false, Ordering::Release);
+        }
+        result
     }
 
     fn is_active(&self) -> bool {

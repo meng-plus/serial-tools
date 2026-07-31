@@ -20,6 +20,7 @@ impl MockTransport {
             descriptor: TransportDescriptor {
                 kind: kind.to_string(),
                 address: address.to_string(),
+                ..Default::default()
             },
             rx_queue: Arc::new(Mutex::new(VecDeque::new())),
             tx_log: Arc::new(Mutex::new(Vec::new())),

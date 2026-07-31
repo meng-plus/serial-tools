@@ -1,0 +1,258 @@
+use std::fs::{self, File};
+use std::io::Write;
+use std::path::PathBuf;
+
+/// 日志格式
+#[derive(Debug, Clone, PartialEq)]
+pub enum LogFormat {
+    /// 原始字节，rx/tx 独立文件
+    Bin,
+    /// CSV：timestamp,direction,channel_id,bytes_hex,bytes_text
+    Csv,
+    /// HEX：十六进制文本，每行 16 字节，带偏移地址
+    Hex,
+}
+
+/// 数据日志录制器
+pub struct DataLogger {
+    format: LogFormat,
+    output_dir: PathBuf,
+    rx_file: Option<File>,
+    tx_file: Option<File>,
+    running: bool,
+}
+
+impl DataLogger {
+    /// 创建新的 DataLogger
+    pub fn new(format: LogFormat, output_dir: PathBuf) -> Self {
+        Self {
+            format,
+            output_dir,
+            rx_file: None,
+            tx_file: None,
+            running: false,
+        }
+    }
+
+    /// 打开文件，开始录制
+    pub fn start(&mut self) -> std::io::Result<()> {
+        if self.running {
+            return Ok(());
+        }
+
+        fs::create_dir_all(&self.output_dir)?;
+
+        let now = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S");
+
+        match self.format {
+            LogFormat::Bin => {
+                let rx_path = self.output_dir.join(format!("{now}_rx.bin"));
+                let tx_path = self.output_dir.join(format!("{now}_tx.bin"));
+                self.rx_file = Some(File::create(rx_path)?);
+                self.tx_file = Some(File::create(tx_path)?);
+            }
+            LogFormat::Csv => {
+                let rx_path = self.output_dir.join(format!("{now}_rx.csv"));
+                let tx_path = self.output_dir.join(format!("{now}_tx.csv"));
+                let mut rx_f = File::create(rx_path)?;
+                let mut tx_f = File::create(tx_path)?;
+                let header = "timestamp,direction,channel_id,bytes_hex,bytes_text\n";
+                rx_f.write_all(header.as_bytes())?;
+                tx_f.write_all(header.as_bytes())?;
+                self.rx_file = Some(rx_f);
+                self.tx_file = Some(tx_f);
+            }
+            LogFormat::Hex => {
+                let rx_path = self.output_dir.join(format!("{now}_rx.hex"));
+                let tx_path = self.output_dir.join(format!("{now}_tx.hex"));
+                self.rx_file = Some(File::create(rx_path)?);
+                self.tx_file = Some(File::create(tx_path)?);
+            }
+        }
+
+        self.running = true;
+        Ok(())
+    }
+
+    /// 记录接收数据
+    pub fn log_rx(&mut self, data: &[u8], timestamp: &str) {
+        if !self.running {
+            return;
+        }
+        if let Some(ref mut file) = self.rx_file {
+            Self::write_data(&self.format, file, data, timestamp, "rx");
+        }
+    }
+
+    /// 记录发送数据
+    pub fn log_tx(&mut self, data: &[u8], timestamp: &str) {
+        if !self.running {
+            return;
+        }
+        if let Some(ref mut file) = self.tx_file {
+            Self::write_data(&self.format, file, data, timestamp, "tx");
+        }
+    }
+
+    /// 停止录制，关闭文件
+    pub fn stop(&mut self) {
+        self.rx_file = None;
+        self.tx_file = None;
+        self.running = false;
+    }
+
+    fn write_data(format: &LogFormat, file: &mut File, data: &[u8], timestamp: &str, direction: &str) {
+        match format {
+            LogFormat::Bin => {
+                let _ = file.write_all(data);
+            }
+            LogFormat::Csv => {
+                let hex_str: String = data.iter().map(|b| format!("{b:02x}")).collect();
+                let text_str: String = data
+                    .iter()
+                    .map(|&b| {
+                        if b.is_ascii_graphic() || b == b' ' {
+                            b as char
+                        } else {
+                            '.'
+                        }
+                    })
+                    .collect();
+                let line = format!("{timestamp},{direction},0,{hex_str},{text_str}\n");
+                let _ = file.write_all(line.as_bytes());
+            }
+            LogFormat::Hex => {
+                // 每行 16 字节，带偏移地址
+                for (chunk_idx, chunk) in data.chunks(16).enumerate() {
+                    let offset = chunk_idx * 16;
+                    let hex_part: String = chunk
+                        .iter()
+                        .enumerate()
+                        .map(|(i, b)| {
+                            if i == 8 {
+                                format!("  {b:02X}")
+                            } else {
+                                format!("{b:02X}")
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    let ascii_part: String = chunk
+                        .iter()
+                        .map(|&b| {
+                            if b.is_ascii_graphic() || b == b' ' {
+                                b as char
+                            } else {
+                                '.'
+                            }
+                        })
+                        .collect();
+                    let line = format!(
+                        "{:08X}  {:<pad_width$}  |{ascii_part}|\n",
+                        offset,
+                        hex_part,
+                        pad_width = 48
+                    );
+                    let _ = file.write_all(line.as_bytes());
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_logger_new() {
+        let logger = DataLogger::new(LogFormat::Bin, PathBuf::from("/tmp/test"));
+        assert_eq!(logger.format, LogFormat::Bin);
+        assert!(!logger.running);
+    }
+
+    #[test]
+    fn test_logger_start_stop_bin() {
+        let dir = tempdir().unwrap();
+        let mut logger = DataLogger::new(LogFormat::Bin, dir.path().to_path_buf());
+        logger.start().unwrap();
+        assert!(logger.running);
+        logger.stop();
+        assert!(!logger.running);
+
+        // 应该生成了 rx 和 tx 文件
+        let entries: Vec<_> = fs::read_dir(dir.path()).unwrap().collect();
+        assert_eq!(entries.len(), 2);
+    }
+
+    #[test]
+    fn test_logger_start_stop_csv() {
+        let dir = tempdir().unwrap();
+        let mut logger = DataLogger::new(LogFormat::Csv, dir.path().to_path_buf());
+        logger.start().unwrap();
+        logger.log_rx(b"hello", "2026-07-31 12:00:00");
+        logger.log_tx(b"world", "2026-07-31 12:00:01");
+        logger.stop();
+
+        // 读取 rx csv 内容
+        let entries: Vec<_> = fs::read_dir(dir.path()).unwrap().collect();
+        let mut rx_content = String::new();
+        let mut tx_content = String::new();
+        for entry in entries {
+            let path = entry.unwrap().path();
+            let content = fs::read_to_string(&path).unwrap();
+            if path.to_string_lossy().contains("_rx.csv") {
+                rx_content = content;
+            } else if path.to_string_lossy().contains("_tx.csv") {
+                tx_content = content;
+            }
+        }
+        assert!(rx_content.contains("timestamp,direction,channel_id,bytes_hex,bytes_text"));
+        assert!(rx_content.contains("2026-07-31 12:00:00,rx,0,68656c6c6f,hello"));
+        assert!(tx_content.contains("2026-07-31 12:00:01,tx,0,776f726c64,world"));
+    }
+
+    #[test]
+    fn test_logger_hex_format() {
+        let dir = tempdir().unwrap();
+        let mut logger = DataLogger::new(LogFormat::Hex, dir.path().to_path_buf());
+        logger.start().unwrap();
+        let data: Vec<u8> = (0..=255).collect();
+        logger.log_rx(&data, "2026-07-31 12:00:00");
+        logger.stop();
+
+        let entries: Vec<_> = fs::read_dir(dir.path()).unwrap().collect();
+        for entry in entries {
+            let path = entry.unwrap().path();
+            if path.to_string_lossy().contains("_rx.hex") {
+                let content = fs::read_to_string(&path).unwrap();
+                let lines: Vec<&str> = content.lines().collect();
+                // 256 bytes / 16 = 16 lines
+                assert_eq!(lines.len(), 16);
+                assert!(lines[0].contains("00000000"));
+                assert!(lines[0].contains("01 02 03"));
+            }
+        }
+    }
+
+    #[test]
+    fn test_logger_log_before_start_is_noop() {
+        let dir = tempdir().unwrap();
+        let mut logger = DataLogger::new(LogFormat::Bin, dir.path().to_path_buf());
+        // 不 start 直接 log，不会 panic
+        logger.log_rx(b"test", "ts");
+        logger.log_tx(b"test", "ts");
+        logger.stop();
+    }
+
+    #[test]
+    fn test_logger_start_idempotent() {
+        let dir = tempdir().unwrap();
+        let mut logger = DataLogger::new(LogFormat::Bin, dir.path().to_path_buf());
+        logger.start().unwrap();
+        logger.start().unwrap(); // 第二次应该安全返回 Ok
+        logger.stop();
+    }
+}

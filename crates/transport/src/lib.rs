@@ -6,6 +6,7 @@ pub mod serial;
 pub mod tcp;
 pub mod mqtt;
 pub mod mock;
+pub mod framer;
 
 use thiserror::Error;
 
@@ -63,10 +64,11 @@ pub trait Transport: Send + Sync {
 }
 
 /// 传输层描述信息
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct TransportDescriptor {
     pub kind: String,
     pub address: String,
+    pub half_duplex: bool,
 }
 
 /// 传输层配置
