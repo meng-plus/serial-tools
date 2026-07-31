@@ -68,11 +68,14 @@ send_data
 ```
 serial-tools/
 ├── crates/transport/     # 唯一独立业务 crate
-│   └── serial / tcp / mqtt(stub) / mock / framer
+│   └── serial / tcp/{client,server} / mqtt(stub) / mock / framer(未接线)
 ├── src-tauri/src/
-│   ├── state.rs          # AppState + DataBus + spawn_reader
+│   ├── state.rs               # AppState + DataBus + spawn_reader + remove_channel
+│   ├── disconnect_reason.rs   # Local | Remote | Error
+│   ├── channel_lifecycle.rs   # register / close_* / finalize_peer / emit
+│   ├── tcp_server_monitor.rs  # 新客户端入账（走 register_server_client）
 │   ├── event_bridge.rs
-│   └── commands/
+│   └── commands/              # connection 仅命令编排，无读循环实现
 ├── src/                  # Vue
 │   ├── pages / stores / api / components / router
 └── docs/
@@ -114,17 +117,25 @@ pub trait Transport: Send + Sync {
 
 ## 4. AppState / 通道生命周期
 
-```
-connect → 创建 Transport → insert channels
-       → spawn_reader（TCP Server 除外）
-       → emit connected
+收口模块：`disconnect_reason` + `channel_lifecycle`（命令层只编排，不复制清理逻辑）。
 
-remove_channel → cancel=true → shutdown 传输 → join 读线程(≤2s)
+```
+connect
+  → register_channel（serial / tcp_client）
+  → 或 insert tcp_servers + spawn_tcp_server_monitor（tcp_server）
+  → emit_connected
+
+register_server_client
+  → client_parents + register_channel → spawn_reader
+
+remove_channel → cancel → shutdown → join 读线程(≤2s)
 
 对端断开（读线程）:
-  Ok(0)           → reason=remote → 清理 + emit
-  fatal IO (RST)  → reason=error  → 清理 + emit
-本端 disconnect   → reason=local  → 前端按钮提示，读线程不重复 toast
+  Ok(0) / fatal → DisconnectReason::Remote|Error
+               → finalize_peer_disconnect（kick 写侧 + 清 map + emit）
+本端 disconnect:
+  close_server_local / close_channel_local → reason=local emit
+  读线程见 cancel → note_reader_exit（不重复 toast）
 ```
 
 命令名：`connect` / `disconnect` / `disconnect_client` / `disconnect_all`（非 open/close）。

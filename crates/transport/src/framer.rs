@@ -1,3 +1,7 @@
+//! 分帧器（库内实现，**尚未接入** spawn_reader 读路径）
+//!
+//! 业务仍按「每次 read 一块」推送；正式接线见 ROADMAP / REFINEMENT。
+
 use std::time::{Duration, Instant};
 
 /// 分帧器配置

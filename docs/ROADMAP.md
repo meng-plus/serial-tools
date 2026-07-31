@@ -8,6 +8,7 @@
 - 终端事件驱动 RX、seq 去重、GBK 发送
 - 断开原因区分、优雅 FIN
 - 自定义右键、关于页 / 图标 / 去 gltech
+- 维护整理：`DisconnectReason` + `channel_lifecycle`、tcp 模块拆分、stub 标清
 
 ## 推荐下一阶段（按价值）
 

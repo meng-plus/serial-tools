@@ -1,6 +1,6 @@
-//! MQTT 传输层占位实现
+//! MQTT 传输层占位（STUB）— 未接入 UI / connect 命令
 //!
-//! TODO: 集成 rumqttc 实现完整 MQTT 传输
+//! 所有 open/read/write 返回「尚未实现」。正式实现前勿在产品文案中宣称已支持。
 
 use super::*;
 

@@ -1,9 +1,12 @@
 //! Serial Tools - Tauri 后端入口
 
+pub mod channel_lifecycle;
 pub mod commands;
-pub mod state;
-pub mod logger;
+pub mod disconnect_reason;
 pub mod event_bridge;
+pub mod logger;
+pub mod state;
+pub mod tcp_server_monitor;
 
 use state::AppState;
 use tauri::Manager;

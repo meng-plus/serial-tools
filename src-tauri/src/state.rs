@@ -8,10 +8,13 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 use tokio::sync::{broadcast, Mutex, RwLock};
 use transport::Transport;
 use transport::tcp::TcpServerTransport;
+
+use crate::channel_lifecycle::{finalize_from_app, note_reader_exit_from_app};
+use crate::disconnect_reason::DisconnectReason;
 
 /// 推送给前端的连接变更事件
 #[derive(Clone, serde::Serialize)]
@@ -165,7 +168,7 @@ impl AppState {
 
     /// 为某个 channel 启动读线程
     ///
-    /// TCP 对端断开时：`remote`=优雅 FIN，`error`=RST/异常；本端主动断开由 `remove_channel` 置 cancel，不在此重复 emit。
+    /// 对端断开经 `finalize_from_app` 收口；本端 `remove_channel` 置 cancel，不重复 emit。
     pub async fn spawn_reader(
         &self,
         channel_id: String,
@@ -180,18 +183,13 @@ impl AppState {
 
         let packets = self.packets.clone();
         let rx_tx = self.rx_broadcast.clone();
-        let log = self.logs.clone();
-        let log_broadcast = self.log_broadcast.clone();
         let seq_counter = self.packet_seq.clone();
-        let channels = self.channels.clone();
-        let cancels = self.channel_cancels.clone();
-        let readers = self.channel_readers.clone();
         let cid = channel_id.clone();
         let rt = tokio::runtime::Handle::current();
 
         let handle = std::thread::spawn(move || {
             let mut buf = [0u8; 4096];
-            let mut peer_reason: Option<&'static str> = None;
+            let mut peer_reason: Option<DisconnectReason> = None;
             loop {
                 if cancel.load(Ordering::Relaxed) {
                     break;
@@ -205,7 +203,7 @@ impl AppState {
                         }
                         if desc.kind == "tcp_client" || desc.kind == "tcp_server_client" {
                             if !cancel.load(Ordering::Relaxed) {
-                                peer_reason = Some("remote");
+                                peer_reason = Some(DisconnectReason::Remote);
                             }
                             break;
                         }
@@ -254,7 +252,7 @@ impl AppState {
                         if e.is_fatal_disconnect() {
                             let desc = transport.descriptor();
                             if desc.kind == "tcp_client" || desc.kind == "tcp_server_client" {
-                                peer_reason = Some("error");
+                                peer_reason = Some(DisconnectReason::Error);
                                 break;
                             }
                         }
@@ -263,60 +261,12 @@ impl AppState {
                 }
             }
 
-            let reason = peer_reason;
-            if let Some(reason) = reason {
+            if let Some(reason) = peer_reason {
                 let kind = transport.descriptor().kind.clone();
                 let addr = transport.descriptor().address.clone();
-                let _ = transport.shutdown();
-                rt.block_on(async {
-                    channels.write().await.remove(&cid);
-                    cancels.write().await.remove(&cid);
-                    readers.write().await.remove(&cid);
-                });
-
-                let msg = if reason == "remote" {
-                    format!("{} 已断开", cid)
-                } else {
-                    format!("{} 服务异常", cid)
-                };
-                let level = if reason == "remote" { "info" } else { "warn" };
-                let entry = LogEntry {
-                    timestamp: chrono::Local::now()
-                        .format("%H:%M:%S%.3f")
-                        .to_string(),
-                    level: level.to_string(),
-                    source: "connection".to_string(),
-                    message: msg.clone(),
-                };
-                let _ = log_broadcast.send(entry.clone());
-                rt.block_on(async {
-                    log.lock().await.push(entry);
-                });
-
-                let _ = app.emit(
-                    "connection-changed",
-                    ConnectionEventPayload {
-                        channel_id: cid.clone(),
-                        connected: false,
-                        transport_type: kind,
-                        port_name: addr,
-                        parent_channel_id: None,
-                        server_clients: None,
-                        reason: Some(reason.to_string()),
-                    },
-                );
+                finalize_from_app(&app, &rt, &cid, kind, addr, reason);
             } else {
-                rt.block_on(async {
-                    let mut lg = log.lock().await;
-                    lg.push(LogEntry {
-                        timestamp: chrono::Local::now()
-                            .format("%H:%M:%S%.3f")
-                            .to_string(),
-                        level: "info".to_string(),
-                        source: "reader".to_string(),
-                        message: format!("读线程退出: {}", cid),
-                    });
-                });
+                note_reader_exit_from_app(&app, &rt, &cid);
             }
         });
 

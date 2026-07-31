@@ -1,4 +1,6 @@
-//! 协议解析命令
+//! 协议解析命令（STUB）— 前端 Protocol 页有壳，后端仍返回空列表
+//!
+//! 接入解析管线前勿宣称「协议解析已可用」。见 ROADMAP P0。
 
 use crate::state::AppState;
 use tauri::State;

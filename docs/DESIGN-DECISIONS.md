@@ -183,6 +183,22 @@ BusSubscription { channel_id, direction: RxToBus | TxFromBus | Both }
 
 **理由**: 粗暴 drop 易导致对端提示「服务异常」；与 sscom 等工具的「已断开」体验对齐。
 
+**实现收口**: `DisconnectReason` + `channel_lifecycle`（`close_*_local` / `finalize_peer_disconnect`），避免 connection 命令与读线程各写一套清理。
+
 ## 17. 应用内右键菜单
 
 **决策**: 全局拦截 WebView 浏览器右键，提供调试相关动作（复制日志、清屏、剪切粘贴、刷新连接等）。
+
+## 18. 维护边界（当前刻意不做）
+
+**决策**: 本阶段只做结构整理与健壮性收口，不新增产品功能。
+
+**已做**:
+- `transport::tcp` 拆为 `client` / `server` 模块
+- 通道生命周期统一入口；TCP Server 监控独立文件
+- stub 标清：`mqtt` / `commands/protocol` / `framer`（未接线）
+
+**明确不做**（见 ROADMAP P3）:
+- 独立 ChannelManager crate
+- async Transport 整仓重写
+- 在 stub 上假装已实现 MQTT / 协议解析
