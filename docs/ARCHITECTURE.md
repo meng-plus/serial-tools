@@ -160,6 +160,98 @@ pub struct RxBroadcastEvent {
 
 `broadcast::channel(1024)` 支持多个订阅者（终端 + 转发器同时监听）。
 
+## 通信框架核心抽象：Transport → Channel → Duplex
+
+通信层采用三层抽象，自底向上：
+
+```
+┌─────────────────────────────────────────────────────┐
+│  Transport（物理连接）                                │
+│  负责底层 IO：打开端口、读写字节、管理连接               │
+│  一个 Transport 实例 = 一个物理连接                     │
+├─────────────────────────────────────────────────────┤
+│  Channel（逻辑通道）                                  │
+│  封装 Duplex 控制、广播数据事件、统计信息               │
+│  一个 Transport 可创建 1~N 个 Channel                  │
+├─────────────────────────────────────────────────────┤
+│  DuplexMode（双工模式）                               │
+│  Full / Half / SimplexTx / SimplexRx                 │
+│  控制通道的收发行为                                    │
+└─────────────────────────────────────────────────────┘
+```
+
+### DuplexMode 枚举
+
+```rust
+pub enum DuplexMode {
+    Full,       // 全双工：TX/RX 独立并行（UART 全双工、TCP）
+    Half,       // 半双工：TX/RX 互斥（RS485 单总线）
+    SimplexTx,  // 只发送
+    SimplexRx,  // 只接收
+}
+```
+
+### Transport 与 Channel 的映射关系
+
+| Transport 类型 | 线程模型 | Channel 数量 | 说明 |
+|---------------|---------|-------------|------|
+| **UART** | 1 线程 | **1 个** | 独占串口，1 线程 = 1 Channel |
+| **TCP Client** | 1 线程 | **1 个** | 单连接 |
+| **TCP Server** | 1 监听 + N 线程 | **N 个** | 每客户端 = 1 Channel（独立线程） |
+| **UDP** | 1 线程 | **1 个** | 单 socket |
+
+### 关键设计原则
+
+**1 Transport 可创建多个 Channel**
+
+```
+TCP Server Transport:
+  ├── 接受客户端 A → 创建 Channel-A (thread-A)
+  ├── 接受客户端 B → 创建 Channel-B (thread-B)
+  └── 接受客户端 C → 创建 Channel-C (thread-C)
+
+UART Transport:
+  └── 打开串口 → 创建 Channel-0 (thread-0)
+       未来协议分包扩展：
+       └── 基于 Channel-0 创建 Protocol-Ch1, Protocol-Ch2 ...
+```
+
+**Channel 区分 Duplex 模式**
+
+```
+Channel-A: DuplexMode::Full    (TCP，全双工)
+Channel-B: DuplexMode::Half    (RS485，半双工)
+Channel-C: DuplexMode::SimplexRx (只读监控)
+```
+
+半双工控制逻辑（在 Channel 层）：
+- TX 发送前检查 `receiving` 标志
+- RX 接收期间设置 `receiving = true`
+- TX 等待 RX 空闲后发送
+
+**未来扩展：协议分包创建多 Channel**
+
+```
+UART Transport (1 物理连接)
+  └── Channel-0 (物理通道，全双工)
+       ├── Protocol-Ch1: Modbus RTU (DuplexMode::Half)
+       ├── Protocol-Ch2: 自定义协议 (DuplexMode::Full)
+       └── Protocol-Ch3: 原始数据 (DuplexMode::Full)
+```
+
+每个协议 Channel 独立广播自己的解码数据，上层 UI 可同时查看多个协议。
+
+### 当前实现状态
+
+| 功能 | 状态 | 说明 |
+|------|------|------|
+| Transport trait | ✅ 已实现 | read/write/sync 阻塞 |
+| DuplexMode 枚举 | ✅ 已设计 | Full/Half/SimplexTx/SimplexRx |
+| UART 1:1 Channel | ✅ 已实现 | 每通道独立读线程 |
+| TCP Server 1:N Channel | ⏳ 预留 | TransportConfig::TcpServer 已定义 |
+| RS485 半双工互斥 | ⏳ 待实现 | 需 receiving 标志 |
+| 协议分包多 Channel | 🔮 远期 | 基于 Channel + Framer 扩展 |
+
 ## 通道模型
 
 ### 每个通道的生命周期
