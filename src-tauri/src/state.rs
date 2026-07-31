@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex, RwLock};
 use transport::Transport;
+use transport::tcp::TcpServerTransport;
 
 // ── 数据包 & 日志 ──────────────────────────────────────────────
 
@@ -23,7 +24,7 @@ pub struct PacketEntry {
     pub text: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct LogEntry {
     pub timestamp: String,
     pub level: String,
@@ -61,11 +62,14 @@ pub struct ForwarderHandle {
 
 pub struct AppState {
     /// 活跃的传输通道: channel_id → transport
-    pub channels: RwLock<HashMap<String, Arc<dyn Transport>>>,
+    pub channels: Arc<RwLock<HashMap<String, Arc<dyn Transport>>>>,
     /// 每个通道的取消标志
-    pub channel_cancels: RwLock<HashMap<String, Arc<AtomicBool>>>,
+    pub channel_cancels: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
     /// 每个通道的读线程句柄
-    pub channel_readers: RwLock<HashMap<String, std::thread::JoinHandle<()>>>,
+    pub channel_readers: Arc<RwLock<HashMap<String, std::thread::JoinHandle<()>>>>,
+
+    /// TCP Server 实例（用于提取新客户端）
+    pub tcp_servers: Arc<RwLock<HashMap<String, Arc<TcpServerTransport>>>>,
 
     /// 转发器: forwarder_id → handle
     pub forwarders: RwLock<HashMap<String, ForwarderHandle>>,
@@ -77,6 +81,8 @@ pub struct AppState {
 
     /// 日志
     pub logs: Arc<Mutex<Vec<LogEntry>>>,
+    /// 日志广播（事件桥接订阅）
+    pub log_broadcast: broadcast::Sender<LogEntry>,
 }
 
 #[derive(Debug, Clone)]
@@ -89,14 +95,17 @@ pub struct RxBroadcastEvent {
 impl Default for AppState {
     fn default() -> Self {
         let (rx_broadcast, _) = broadcast::channel(1024);
+        let (log_broadcast, _) = broadcast::channel(256);
         Self {
-            channels: RwLock::new(HashMap::new()),
-            channel_cancels: RwLock::new(HashMap::new()),
-            channel_readers: RwLock::new(HashMap::new()),
+            channels: Arc::new(RwLock::new(HashMap::new())),
+            channel_cancels: Arc::new(RwLock::new(HashMap::new())),
+            channel_readers: Arc::new(RwLock::new(HashMap::new())),
+            tcp_servers: Arc::new(RwLock::new(HashMap::new())),
             forwarders: RwLock::new(HashMap::new()),
             packets: Arc::new(Mutex::new(Vec::with_capacity(10000))),
             rx_broadcast,
             logs: Arc::new(Mutex::new(Vec::with_capacity(1000))),
+            log_broadcast,
         }
     }
 }
@@ -109,6 +118,7 @@ impl AppState {
             source: source.to_string(),
             message: message.to_string(),
         };
+        let _ = self.log_broadcast.send(entry.clone());
         self.logs.lock().await.push(entry);
     }
 
@@ -138,6 +148,7 @@ impl AppState {
         let rx_tx = self.rx_broadcast.clone();
         let log = self.logs.clone();
         let cid = channel_id.clone();
+        let rt = tokio::runtime::Handle::current();
 
         let handle = std::thread::spawn(move || {
             let mut buf = [0u8; 4096];
@@ -147,13 +158,11 @@ impl AppState {
                 }
                 match transport.read(&mut buf) {
                     Ok(0) => {
-                        // 连接可能已关闭（TCP 返回 0 表示对端关闭）
                         let desc = transport.descriptor();
                         if desc.kind == "tcp_client" || desc.kind == "tcp_server" {
                             cancel.store(true, Ordering::Relaxed);
                             break;
                         }
-                        // 串口 read 返回 0 是超时，继续
                         std::thread::sleep(std::time::Duration::from_millis(5));
                     }
                     Ok(n) => {
@@ -167,8 +176,6 @@ impl AppState {
                         // 存入 packets
                         {
                             let pkts = packets.clone();
-                            // 同步锁（在 std::thread 里用 block_on）
-                            let rt = tokio::runtime::Handle::current();
                             rt.block_on(async {
                                 let mut pkts = pkts.lock().await;
                                 pkts.push(PacketEntry {
@@ -186,7 +193,7 @@ impl AppState {
                             });
                         }
 
-                        // 广播给转发器
+                        // 广播给转发器和事件桥接
                         let _ = rx_tx.send(RxBroadcastEvent {
                             channel_id: cid.clone(),
                             bytes: data,
@@ -194,13 +201,11 @@ impl AppState {
                         });
                     }
                     Err(_e) => {
-                        // 读错误（串口断开等），短暂等待后重试
                         std::thread::sleep(std::time::Duration::from_millis(10));
                     }
                 }
             }
             // 读线程退出，记录日志
-            let rt = tokio::runtime::Handle::current();
             rt.block_on(async {
                 let mut lg = log.lock().await;
                 lg.push(LogEntry {

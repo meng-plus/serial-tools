@@ -1,145 +1,222 @@
 <template>
-  <div>
-    <a-card title="通信连接" :bordered="false">
-      <a-form layout="vertical">
-        <a-form-item label="连接类型">
-          <a-radio-group v-model:value="form.conn_type">
-            <a-radio-button value="serial">串口 (UART/RS485)</a-radio-button>
-            <a-radio-button value="tcp_client">TCP 客户端</a-radio-button>
-          </a-radio-group>
-        </a-form-item>
+  <div class="connection-page">
+    <a-row :gutter="16">
+      <a-col :span="10">
+        <a-card title="新建连接" :bordered="false" size="small">
+          <a-form layout="vertical" :model="form">
+            <a-form-item label="连接类型">
+              <a-segmented v-model:value="form.conn_type" :options="[
+                { label: '串口', value: 'serial' },
+                { label: 'TCP 客户端', value: 'tcp_client' },
+                { label: 'TCP 服务端', value: 'tcp_server' },
+              ]" />
+            </a-form-item>
 
-        <template v-if="form.conn_type === 'serial'">
-          <a-form-item label="串口">
-            <a-select v-model:value="form.port" style="width: 300px" placeholder="选择串口">
-              <a-select-option v-for="p in ports" :key="p.name" :value="p.name">
-                {{ p.name }} — {{ p.description }}
-              </a-select-option>
-            </a-select>
-            <a-button style="margin-left: 8px" @click="loadPorts">刷新</a-button>
-          </a-form-item>
-          <a-form-item label="波特率">
-            <a-select v-model:value="form.baud_rate" style="width: 200px">
-              <a-select-option :value="9600">9600</a-select-option>
-              <a-select-option :value="19200">19200</a-select-option>
-              <a-select-option :value="38400">38400</a-select-option>
-              <a-select-option :value="57600">57600</a-select-option>
-              <a-select-option :value="115200">115200</a-select-option>
-              <a-select-option :value="230400">230400</a-select-option>
-              <a-select-option :value="460800">460800</a-select-option>
-              <a-select-option :value="921600">921600</a-select-option>
-            </a-select>
-          </a-form-item>
-        </template>
+            <template v-if="form.conn_type === 'serial'">
+              <a-form-item label="串口">
+                <a-space>
+                  <a-select v-model:value="form.port" style="width: 260px" placeholder="选择串口" show-search>
+                    <a-select-option v-for="p in ports" :key="p.name" :value="p.name">
+                      {{ p.name }} — {{ p.description }}
+                    </a-select-option>
+                  </a-select>
+                  <a-button @click="connectionStore.loadPorts()">
+                    <template #icon><ReloadOutlined /></template>
+                  </a-button>
+                </a-space>
+              </a-form-item>
+              <a-row :gutter="12">
+                <a-col :span="12">
+                  <a-form-item label="波特率">
+                    <a-select v-model:value="form.baud_rate" style="width: 100%">
+                      <a-select-option v-for="b in baudRates" :key="b" :value="b">{{ b }}</a-select-option>
+                    </a-select>
+                  </a-form-item>
+                </a-col>
+                <a-col :span="4">
+                  <a-form-item label="数据位">
+                    <a-select v-model:value="form.data_bits" style="width: 100%">
+                      <a-select-option :value="7">7</a-select-option>
+                      <a-select-option :value="8">8</a-select-option>
+                    </a-select>
+                  </a-form-item>
+                </a-col>
+                <a-col :span="4">
+                  <a-form-item label="停止位">
+                    <a-select v-model:value="form.stop_bits" style="width: 100%">
+                      <a-select-option :value="1">1</a-select-option>
+                      <a-select-option :value="2">2</a-select-option>
+                    </a-select>
+                  </a-form-item>
+                </a-col>
+                <a-col :span="4">
+                  <a-form-item label="校验">
+                    <a-select v-model:value="form.parity" style="width: 100%">
+                      <a-select-option value="None">None</a-select-option>
+                      <a-select-option value="Even">Even</a-select-option>
+                      <a-select-option value="Odd">Odd</a-select-option>
+                    </a-select>
+                  </a-form-item>
+                </a-col>
+              </a-row>
+              <a-form-item>
+                <a-checkbox v-model:checked="form.half_duplex">RS485 半双工</a-checkbox>
+              </a-form-item>
+            </template>
 
-        <template v-if="form.conn_type === 'tcp_client'">
-          <a-form-item label="主机地址">
-            <a-input v-model:value="form.host" style="width: 300px" placeholder="192.168.1.100" />
-          </a-form-item>
-          <a-form-item label="端口">
-            <a-input-number v-model:value="form.tcp_port" :min="1" :max="65535" style="width: 200px" />
-          </a-form-item>
-        </template>
-      </a-form>
+            <template v-if="form.conn_type === 'tcp_client'">
+              <a-form-item label="主机地址">
+                <a-input v-model:value="form.host" placeholder="192.168.1.100" />
+              </a-form-item>
+              <a-form-item label="端口">
+                <a-input-number v-model:value="form.tcp_port" :min="1" :max="65535" style="width: 100%" />
+              </a-form-item>
+            </template>
 
-      <a-button type="primary" :loading="connecting" @click="handleConnect" :disabled="connected">
-        连接
-      </a-button>
-    </a-card>
+            <template v-if="form.conn_type === 'tcp_server'">
+              <a-form-item label="绑定地址">
+                <a-input v-model:value="form.bind_addr" placeholder="0.0.0.0" />
+                <div style="color: #999; font-size: 12px; margin-top: 4px;">0.0.0.0 表示监听所有网卡</div>
+              </a-form-item>
+              <a-form-item label="监听端口">
+                <a-input-number v-model:value="form.tcp_port" :min="1" :max="65535" style="width: 100%" />
+              </a-form-item>
+            </template>
 
-    <!-- 已连接的通道列表 -->
-    <a-card title="已连接通道" :bordered="false" style="margin-top: 16px">
-      <a-table
-        :columns="columns"
-        :data-source="connections"
-        :pagination="false"
-        size="small"
-      >
-        <template #bodyCell="{ column, record }">
-          <template v-if="column.key === 'status'">
-            <a-tag :color="record.connected ? 'success' : 'error'">
-              {{ record.connected ? '已连接' : '断开' }}
-            </a-tag>
-          </template>
-          <template v-if="column.key === 'action'">
-            <a-button size="small" danger @click="handleDisconnect(record.channel_id)">
-              断开
+            <a-button type="primary" block :loading="connecting" @click="handleConnect">
+              连接
+            </a-button>
+          </a-form>
+        </a-card>
+      </a-col>
+
+      <a-col :span="14">
+        <a-card title="已连接通道" :bordered="false" size="small">
+          <template #extra>
+            <a-button size="small" danger @click="handleDisconnectAll" :disabled="!connectionStore.hasConnection">
+              全部断开
             </a-button>
           </template>
-        </template>
-      </a-table>
-      <a-empty v-if="connections.length === 0" description="暂无连接" />
-    </a-card>
+          <a-table
+            :columns="columns"
+            :data-source="channelList"
+            :pagination="false"
+            size="small"
+            row-key="channelId"
+          >
+            <template #bodyCell="{ column, record }">
+              <template v-if="column.key === 'type'">
+                <a-tag>{{ typeLabels[record.transportType] || record.transportType }}</a-tag>
+              </template>
+              <template v-if="column.key === 'status'">
+                <a-badge status="success" text="已连接" v-if="record.connected" />
+                <a-badge status="error" text="断开" v-else />
+              </template>
+              <template v-if="column.key === 'clients'">
+                <template v-if="record.clients && record.clients.length > 0">
+                  <a-tag v-for="c in record.clients" :key="c" size="small" color="blue">{{ c }}</a-tag>
+                </template>
+                <span v-else-if="record.transportType === 'tcp_server'" style="color: #999">等待连接...</span>
+              </template>
+              <template v-if="column.key === 'action'">
+                <a-space>
+                  <a-button size="small" @click="openTerminal(record.channelId)">终端</a-button>
+                  <a-button size="small" danger @click="connectionStore.disconnect(record.channelId)">断开</a-button>
+                </a-space>
+              </template>
+            </template>
+          </a-table>
+          <a-empty v-if="channelList.length === 0" description="暂无连接" />
+        </a-card>
+      </a-col>
+    </a-row>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { reactive, computed, ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
-import { invoke } from '@/api'
+import { ReloadOutlined } from '@ant-design/icons-vue'
+import { useConnectionStore } from '@/stores'
 
-interface PortInfo {
-  name: string
-  description: string
-}
+const FORM_STORAGE_KEY = 'serial-tools-conn-form'
 
-interface ConnectionStatus {
-  connected: boolean
-  channel_id: string
-  transport_type: string
-  port_name: string
-}
-
+const router = useRouter()
+const connectionStore = useConnectionStore()
 const connecting = ref(false)
-const connected = ref(false)
-const ports = ref<PortInfo[]>([])
-const connections = ref<ConnectionStatus[]>([])
 
+const ports = computed(() => connectionStore.ports)
+const channelList = computed(() => Array.from(connectionStore.channels.values()))
+
+const baudRates = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
+
+const typeLabels: Record<string, string> = {
+  serial: '串口',
+  tcp_client: 'TCP 客户端',
+  tcp_server: 'TCP 服务端',
+}
+
+function loadSavedForm() {
+  try {
+    const saved = localStorage.getItem(FORM_STORAGE_KEY)
+    if (saved) return JSON.parse(saved)
+  } catch { /* ignore */ }
+  return null
+}
+
+function saveForm() {
+  localStorage.setItem(FORM_STORAGE_KEY, JSON.stringify({
+    conn_type: form.conn_type,
+    port: form.port,
+    baud_rate: form.baud_rate,
+    data_bits: form.data_bits,
+    stop_bits: form.stop_bits,
+    parity: form.parity,
+    half_duplex: form.half_duplex,
+    host: form.host,
+    bind_addr: form.bind_addr,
+    tcp_port: form.tcp_port,
+  }))
+}
+
+const saved = loadSavedForm()
 const form = reactive({
-  conn_type: 'serial',
-  port: '',
-  baud_rate: 115200,
-  host: '192.168.1.100',
-  tcp_port: 5000,
+  conn_type: saved?.conn_type || 'serial',
+  port: saved?.port || '',
+  baud_rate: saved?.baud_rate || 115200,
+  data_bits: saved?.data_bits || 8,
+  stop_bits: saved?.stop_bits || 1,
+  parity: saved?.parity || 'None',
+  half_duplex: saved?.half_duplex || false,
+  host: saved?.host || '192.168.1.100',
+  bind_addr: saved?.bind_addr || '0.0.0.0',
+  tcp_port: saved?.tcp_port || 5000,
 })
 
 const columns = [
-  { title: '通道 ID', dataIndex: 'channel_id' },
-  { title: '类型', dataIndex: 'transport_type' },
-  { title: '地址', dataIndex: 'port_name' },
-  { title: '状态', key: 'status' },
-  { title: '操作', key: 'action' },
+  { title: '通道 ID', dataIndex: 'channelId', width: 200 },
+  { title: '类型', key: 'type', width: 100 },
+  { title: '地址', dataIndex: 'portName', width: 150 },
+  { title: '客户端', key: 'clients', width: 200 },
+  { title: '状态', key: 'status', width: 80 },
+  { title: '操作', key: 'action', width: 130 },
 ]
-
-let pollTimer: ReturnType<typeof setInterval> | null = null
-
-async function loadPorts() {
-  try {
-    ports.value = await invoke<PortInfo[]>('list_ports')
-  } catch (e) {
-    console.error('加载串口列表失败:', e)
-  }
-}
-
-async function refreshConnections() {
-  try {
-    connections.value = await invoke<ConnectionStatus[]>('get_connection_status')
-    connected.value = connections.value.some(c => c.connected)
-  } catch (e) {
-    console.error('刷新连接状态失败:', e)
-  }
-}
 
 async function handleConnect() {
   connecting.value = true
+  saveForm()
   try {
-    const result = await invoke<{ success: boolean; message: string; channel_id: string }>(
-      'connect',
-      { request: form }
-    )
+    const result = await connectionStore.connect({
+      conn_type: form.conn_type,
+      port: form.conn_type === 'serial' ? form.port : undefined,
+      baud_rate: form.conn_type === 'serial' ? form.baud_rate : undefined,
+      host: form.conn_type === 'tcp_client' ? form.host : (form.conn_type === 'tcp_server' ? form.bind_addr : undefined),
+      tcp_port: form.conn_type !== 'serial' ? form.tcp_port : undefined,
+      half_duplex: form.conn_type === 'serial' ? form.half_duplex : undefined,
+    })
     if (result.success) {
       message.success(result.message)
-      await refreshConnections()
     }
   } catch (e: any) {
     message.error(String(e))
@@ -148,23 +225,16 @@ async function handleConnect() {
   }
 }
 
-async function handleDisconnect(channelId: string) {
-  try {
-    await invoke('disconnect', { channelId })
-    message.success('已断开')
-    await refreshConnections()
-  } catch (e: any) {
-    message.error(String(e))
-  }
+async function handleDisconnectAll() {
+  await connectionStore.disconnectAll()
+  message.success('已断开所有通道')
 }
 
-onMounted(async () => {
-  await loadPorts()
-  await refreshConnections()
-  pollTimer = setInterval(refreshConnections, 3000)
-})
+function openTerminal(channelId: string) {
+  router.push({ name: 'terminal', query: { channel: channelId } })
+}
 
-onUnmounted(() => {
-  if (pollTimer) clearInterval(pollTimer)
+onMounted(() => {
+  saveForm()
 })
 </script>

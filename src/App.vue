@@ -1,7 +1,7 @@
 <template>
   <a-config-provider :locale="zhCN">
     <a-layout class="app-layout">
-      <a-layout-sider v-model:collapsed="collapsed" :trigger="null" collapsible theme="dark" width="220">
+      <a-layout-sider v-model:collapsed="collapsed" :trigger="null" collapsible theme="dark" :width="220">
         <div class="logo">
           <ApiOutlined v-if="collapsed" class="logo-icon" />
           <template v-else>
@@ -10,7 +10,7 @@
           </template>
         </div>
         <a-menu
-          v-model:selectedKeys="selectedKeys"
+          :selectedKeys="selectedKeys"
           theme="dark"
           mode="inline"
           @click="handleMenuClick"
@@ -25,43 +25,32 @@
       <a-layout>
         <a-layout-header class="header">
           <div class="header-left">
-            <component
-              :is="collapsed ? MenuUnfoldOutlined : MenuFoldOutlined"
-              class="trigger"
-              @click="collapsed = !collapsed"
-            />
-            <div>
-              <div class="page-title">{{ pageTitle }}</div>
-            </div>
+            <component :is="collapsed ? MenuUnfoldOutlined : MenuFoldOutlined" class="trigger" @click="collapsed = !collapsed" />
+            <div class="page-title">{{ pageTitle }}</div>
           </div>
           <div class="header-right">
-            <span :class="['status-dot', connected ? 'connected' : 'disconnected']" />
-            <a-tag :color="connected ? 'success' : 'default'">
-              {{ connected ? connectionStore.portName || '已连接' : '未连接' }}
-            </a-tag>
+            <a-space>
+              <a-tag v-for="ch in connectedChannels" :key="ch.channelId" color="success" closable @close="handleDisconnectChannel(ch.channelId)">
+                {{ ch.transportType === 'serial' ? ch.portName : ch.channelId }}
+              </a-tag>
+              <a-tag v-if="connectedChannels.length === 0" color="default">未连接</a-tag>
+            </a-space>
           </div>
         </a-layout-header>
 
         <a-layout-content class="content">
-          <a-alert
-            v-if="!isTauriEnv"
-            type="warning"
-            show-icon
-            message="浏览器预览模式"
-            description="请使用 npm run tauri dev 启动桌面窗口。"
-            style="margin-bottom: 16px"
-          />
-          <ConnectionPage v-if="currentPage === 'connection'" />
-          <TerminalPage v-else-if="currentPage === 'terminal'" />
-          <ProtocolPage v-else-if="currentPage === 'protocol'" />
-          <ForwardPage v-else-if="currentPage === 'forward'" />
-          <LogPage v-else-if="currentPage === 'log'" />
-          <SettingsPage v-else-if="currentPage === 'settings'" />
+          <a-alert v-if="!isTauriEnv" type="warning" show-icon message="浏览器预览模式" description="请使用 npm run tauri dev 启动桌面窗口。" style="margin-bottom: 16px" />
+          <router-view v-slot="{ Component }">
+            <transition name="fade" mode="out-in">
+              <component :is="Component" />
+            </transition>
+          </router-view>
         </a-layout-content>
 
         <a-layout-footer class="footer">
           <a-space split>
             <span>Serial Tools v0.1.0</span>
+            <span>RX: {{ terminalStore.rxCount }} | TX: {{ terminalStore.txCount }}</span>
           </a-space>
         </a-layout-footer>
       </a-layout>
@@ -70,37 +59,25 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import zhCN from 'ant-design-vue/es/locale/zh_CN'
 import {
-  LinkOutlined,
-  CodeOutlined,
-  BugOutlined,
-  SwapOutlined,
-  FileTextOutlined,
-  SettingOutlined,
-  MenuUnfoldOutlined,
-  MenuFoldOutlined,
-  ApiOutlined,
+  LinkOutlined, CodeOutlined, BugOutlined, SwapOutlined,
+  FileTextOutlined, SettingOutlined, MenuUnfoldOutlined,
+  MenuFoldOutlined, ApiOutlined,
 } from '@ant-design/icons-vue'
-import { useConnectionStore } from './stores'
-import ConnectionPage from './pages/ConnectionPage.vue'
-import TerminalPage from './pages/TerminalPage.vue'
-import ProtocolPage from './pages/ProtocolPage.vue'
-import ForwardPage from './pages/ForwardPage.vue'
-import LogPage from './pages/LogPage.vue'
-import SettingsPage from './pages/SettingsPage.vue'
+import { useConnectionStore, useTerminalStore, useLogStore } from './stores'
 import { isTauri } from './api/tauri'
 
 const isTauriEnv = isTauri()
+const router = useRouter()
+const route = useRoute()
+const connectionStore = useConnectionStore()
+const terminalStore = useTerminalStore()
+const logStore = useLogStore()
 
 const collapsed = ref(false)
-const selectedKeys = ref<string[]>(['connection'])
-const currentPage = ref('connection')
-
-const connectionStore = useConnectionStore()
-
-const connected = computed(() => connectionStore.connected)
 
 const menuItems = [
   { key: 'connection', label: '连接管理', icon: LinkOutlined },
@@ -111,19 +88,28 @@ const menuItems = [
   { key: 'settings', label: '设置', icon: SettingOutlined },
 ]
 
-const pageTitles: Record<string, string> = Object.fromEntries(
-  menuItems.map(i => [i.key, i.label]),
-)
-
-const pageTitle = computed(() => pageTitles[currentPage.value] ?? '')
+const selectedKeys = computed(() => [route.name as string])
+const pageTitle = computed(() => (route.meta?.title as string) || '')
+const connectedChannels = computed(() => connectionStore.connectedChannels)
 
 function handleMenuClick(info: { key: string }) {
-  currentPage.value = info.key
+  router.push({ name: info.key })
+}
+
+async function handleDisconnectChannel(channelId: string) {
+  await connectionStore.disconnect(channelId)
 }
 
 onMounted(async () => {
-  await connectionStore.refreshStatus()
-  await connectionStore.loadPorts()
+  await connectionStore.init()
+  await terminalStore.init()
+  await logStore.init()
+})
+
+onUnmounted(() => {
+  connectionStore.dispose()
+  terminalStore.dispose()
+  logStore.dispose()
 })
 </script>
 
@@ -196,21 +182,6 @@ onMounted(async () => {
   gap: 8px;
 }
 
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  display: inline-block;
-}
-
-.status-dot.connected {
-  background: #52c41a;
-}
-
-.status-dot.disconnected {
-  background: #d9d9d9;
-}
-
 .content {
   margin: 16px;
   padding: 20px;
@@ -226,6 +197,13 @@ onMounted(async () => {
   padding: 8px;
   color: rgba(0, 0, 0, 0.45);
   font-size: 12px;
+}
+
+.fade-enter-active, .fade-leave-active {
+  transition: opacity 0.15s ease;
+}
+.fade-enter-from, .fade-leave-to {
+  opacity: 0;
 }
 </style>
 

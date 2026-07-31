@@ -61,6 +61,8 @@ pub trait Transport: Send + Sync {
     fn is_active(&self) -> bool;
     /// 描述信息
     fn descriptor(&self) -> &TransportDescriptor;
+    /// 已连接客户端列表（仅 TCP Server 有效）
+    fn client_info(&self) -> Vec<String> { vec![] }
 }
 
 /// 传输层描述信息

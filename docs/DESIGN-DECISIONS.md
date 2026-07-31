@@ -130,3 +130,26 @@
 - 原始字节是通用格式，编码是展示层逻辑
 - 前端切换无需请求后端
 - 减少后端复杂度
+
+## 13. Tauri v2 事件桥接（event_bridge）
+
+**决策**: 新增 `event_bridge.rs`，订阅内部 `tokio::sync::broadcast` 频道，通过 `tauri::Emitter::emit()` 推送给前端。
+
+**理由**:
+- 后端 `rx_broadcast` 和 `log_broadcast` 是 Rust 内部频道，不能直接序列化给前端
+- 需要定义 `RxEventPayload` / `LogEventPayload` 等 `serde::Serialize` 类型作为桥接
+- 前端通过 `@tauri-apps/api/event` 的 `listen()` 接收事件，实现零轮询
+
+**关键类型**:
+- `RxEventPayload` — RX 数据事件（channel_id, bytes, hex, text, timestamp）
+- `ConnectionEventPayload` — 连接状态变更（channel_id, connected, transport_type, port_name）
+- `LogEntry`（直接序列化）— 日志事件
+
+## 14. Tauri v2 环境检测
+
+**决策**: 使用 `__TAURI_INTERNALS__` 而非 `__TAURI__` 检测 Tauri 环境。
+
+**理由**:
+- Tauri v2 默认不注入 `window.__TAURI__` 全局对象（Tauri v1 行为）
+- `window.__TAURI_INTERNALS__` 在 Tauri v2 中始终可用
+- 使用 `__TAURI__` 会导致前端误判为浏览器模式，所有 IPC 调用失败

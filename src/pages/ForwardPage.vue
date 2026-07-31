@@ -54,7 +54,6 @@
       <a-empty v-if="forwarders.length === 0" description="暂无转发规则" />
     </a-card>
 
-    <!-- 新建转发对话框 -->
     <a-modal v-model:open="showModal" title="新建转发" @ok="handleCreate" :confirm-loading="creating">
       <a-form layout="vertical">
         <a-form-item label="名称">
@@ -94,6 +93,9 @@
 import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { message } from 'ant-design-vue'
 import { invoke } from '@/api'
+import { useConnectionStore } from '@/stores'
+
+const connectionStore = useConnectionStore()
 
 interface ConnectionStatus {
   connected: boolean
@@ -143,13 +145,19 @@ function directionLabel(d: string): string {
   return d
 }
 
-async function refreshAll() {
-  try {
-    connections.value = await invoke<ConnectionStatus[]>('get_connection_status')
-  } catch (e) { /* ignore */ }
+async function refreshForwarders() {
   try {
     forwarders.value = await invoke<ForwarderInfo[]>('list_forwarders')
-  } catch (e) { /* ignore */ }
+  } catch { /* ignore */ }
+}
+
+function syncConnections() {
+  connections.value = connectionStore.connectedChannels.map(c => ({
+    connected: c.connected,
+    channel_id: c.channelId,
+    transport_type: c.transportType,
+    port_name: c.portName,
+  }))
 }
 
 async function handleCreate() {
@@ -177,7 +185,7 @@ async function handleCreate() {
     newForward.sourceChannelId = ''
     newForward.targetChannelId = ''
     newForward.direction = 'bidirectional'
-    await refreshAll()
+    await refreshForwarders()
   } catch (e: any) {
     message.error(String(e))
   } finally {
@@ -189,7 +197,7 @@ async function handleStop(id: string) {
   try {
     await invoke('stop_forward', { forwarderId: id })
     message.success('转发已停止')
-    await refreshAll()
+    await refreshForwarders()
   } catch (e: any) {
     message.error(String(e))
   }
@@ -199,15 +207,19 @@ async function handleDelete(id: string) {
   try {
     await invoke('delete_forwarder', { forwarderId: id })
     message.success('已删除')
-    await refreshAll()
+    await refreshForwarders()
   } catch (e: any) {
     message.error(String(e))
   }
 }
 
 onMounted(async () => {
-  await refreshAll()
-  pollTimer = setInterval(refreshAll, 3000)
+  syncConnections()
+  await refreshForwarders()
+  pollTimer = setInterval(() => {
+    syncConnections()
+    refreshForwarders()
+  }, 10000)
 })
 
 onUnmounted(() => {

@@ -1,3 +1,4 @@
 export { useConnectionStore } from './connectionStore'
-export { useSessionStore } from './sessionStore'
+export { useTerminalStore } from './terminalStore'
 export { useLogStore } from './logStore'
+export { useSessionStore } from './sessionStore'

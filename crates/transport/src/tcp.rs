@@ -28,6 +28,22 @@ impl TcpClientTransport {
             port,
         }
     }
+
+    /// 从已接受的 TcpStream 创建传输（用于 TCP Server 客户端通道）
+    pub fn from_stream(stream: TcpStream, addr: SocketAddr) -> Self {
+        let addr_str = addr.to_string();
+        let descriptor = TransportDescriptor {
+            kind: "tcp_client".to_string(),
+            address: addr_str,
+            ..Default::default()
+        };
+        Self {
+            stream: Mutex::new(Some(stream)),
+            descriptor,
+            host: addr.ip().to_string(),
+            port: addr.port(),
+        }
+    }
 }
 
 impl Transport for TcpClientTransport {
@@ -75,6 +91,8 @@ impl Transport for TcpClientTransport {
 pub struct TcpServerTransport {
     clients: Arc<Mutex<HashMap<SocketAddr, TcpStream>>>,
     pending: Arc<Mutex<Vec<(SocketAddr, Vec<u8>)>>>,
+    /// 新接受的客户端队列（供外部提取，创建独立通道）
+    new_clients: Arc<Mutex<Vec<(SocketAddr, TcpStream)>>>,
     descriptor: TransportDescriptor,
     listener: Mutex<Option<TcpListener>>,
     running: Arc<Mutex<bool>>,
@@ -93,6 +111,7 @@ impl TcpServerTransport {
         Self {
             clients: Arc::new(Mutex::new(HashMap::new())),
             pending: Arc::new(Mutex::new(Vec::new())),
+            new_clients: Arc::new(Mutex::new(Vec::new())),
             descriptor,
             listener: Mutex::new(None),
             running: Arc::new(Mutex::new(false)),
@@ -105,6 +124,11 @@ impl TcpServerTransport {
     /// 获取当前已连接的客户端地址列表
     pub fn get_clients(&self) -> Vec<SocketAddr> {
         self.clients.lock().unwrap().keys().cloned().collect()
+    }
+
+    /// 提取新接受的客户端（调用后队列清空）
+    pub fn take_new_clients(&self) -> Vec<(SocketAddr, TcpStream)> {
+        self.new_clients.lock().unwrap().drain(..).collect()
     }
 
     /// 踢出指定客户端
@@ -132,9 +156,9 @@ impl Transport for TcpServerTransport {
         *self.running.lock().unwrap() = true;
         *self.listener.lock().unwrap() = Some(listener);
 
-        // 启动 accept 线程
         let clients = self.clients.clone();
         let pending = self.pending.clone();
+        let new_clients = self.new_clients.clone();
         let running = self.running.clone();
         let listener_ref = Mutex::new(self.listener.lock().unwrap().take().unwrap());
 
@@ -144,14 +168,18 @@ impl Transport for TcpServerTransport {
                     break;
                 }
 
-                // 非阻塞 accept，没有新连接时稍等后重试
                 match listener_ref.lock().unwrap().accept() {
                     Ok((stream, addr)) => {
                         stream
                             .set_read_timeout(Some(std::time::Duration::from_millis(10)))
                             .ok();
 
-                        clients.lock().unwrap().insert(addr, stream.try_clone().unwrap());
+                        // 将流克隆：一份给 clients map，一份给读线程
+                        let cloned_stream = stream.try_clone().unwrap();
+                        clients.lock().unwrap().insert(addr, cloned_stream);
+
+                        // 将新客户端推入 new_clients 队列，供外部创建独立通道
+                        new_clients.lock().unwrap().push((addr, stream.try_clone().unwrap()));
 
                         // 为每个客户端启动读线程
                         let clients_clone = clients.clone();
@@ -164,7 +192,6 @@ impl Transport for TcpServerTransport {
                             loop {
                                 match read_stream.read(&mut buf) {
                                     Ok(0) => {
-                                        // 客户端断开
                                         clients_clone.lock().unwrap().remove(&addr);
                                         break;
                                     }
@@ -178,7 +205,6 @@ impl Transport for TcpServerTransport {
                                     Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock
                                         || e.kind() == std::io::ErrorKind::TimedOut =>
                                     {
-                                        // 无数据，继续
                                         if !*running_clone.lock().unwrap() {
                                             clients_clone.lock().unwrap().remove(&addr);
                                             break;
@@ -193,7 +219,6 @@ impl Transport for TcpServerTransport {
                         });
                     }
                     Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        // 没有新连接
                         thread::sleep(std::time::Duration::from_millis(10));
                     }
                     Err(_) => {
@@ -260,5 +285,9 @@ impl Transport for TcpServerTransport {
 
     fn descriptor(&self) -> &TransportDescriptor {
         &self.descriptor
+    }
+
+    fn client_info(&self) -> Vec<String> {
+        self.clients.lock().unwrap().keys().map(|a| a.to_string()).collect()
     }
 }

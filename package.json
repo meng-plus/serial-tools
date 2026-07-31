@@ -21,7 +21,8 @@
     "js-yaml": "^4.1.0",
     "pinia": "^2.2.2",
     "vue": "^3.4.31",
-    "vue-echarts": "^7.0.3"
+    "vue-echarts": "^7.0.3",
+    "vue-router": "^4.6.4"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",
