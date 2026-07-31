@@ -19,7 +19,7 @@
 | 配置迁移 | 会话保存**解析规则**（+可选偏好）；不保存易变连接快照 |
 | 规则作用域 | **方案 B**：不绑死 channelId；仅对当前工作区通道的 RX 生效 |
 | 视图落盘 | 写入 `~/serial-tools-data/exports|channel-logs`，展示绝对路径 |
-| 本阶段不做 | 后端解析管线、Framer 接线、完整 Modbus、真 VT100、单视图多通道 |
+| 本阶段不做 | 后端解析管线、Framer 接线、完整 Modbus、单视图多通道 |
 
 ## 3. UI 信息架构
 
@@ -113,8 +113,9 @@ activeChannelId: serial-COM3
 | `monitor` | B | 本通道多数值卡片 |
 | `chart` | B | 订本通道 valueId |
 | `tx_list` | D | **每条独立定时器**（周期/次数/循环）+ 变量展开 + 可选 CRC |
-| `chat` | E | 对话气泡 |
-| VT100 | 另项 | 不阻塞前序 |
+| `chat` | E | 对话气泡（一行收发 = 一气泡） |
+| `vt100` | E | xterm.js 交互终端 |
+| VT100 增强 | 另项 | 字体/主题偏好中心等 |
 
 ### 定时发送 v2（真实场景）
 
@@ -130,8 +131,31 @@ activeChannelId: serial-COM3
 - **UI+A**：侧栏通道 → 工作区 Tab（终端+解析日志）；regex/JSON 规则生效；一通道过滤正确。
 - **B**：同通道监控+图表。
 - **C**：Workspace 导入导出恢复 views/rules。
-- **D/E**：定时发送、对话；VT100 另立。
+- **D**：定时发送 v2。
+- **E**：对话气泡 + VT100 交互终端。
 
 ## 9. 与旧 ROADMAP 的关系
 
 原「后端 `protocol.rs` 做实」调整为：**前端引擎优先**；Rust `protocol.rs` 保持 stub，直至二进制协议需要后端时再迁。
+
+## 10. Phase E — 对话与 VT100（已批准 2026-08-01）
+
+### 决策
+
+| 项 | 选择 |
+|----|------|
+| 顺序 | 先 Chat，后 VT100 |
+| 对话消息切分 | 本通道每条 RX/TX 记录 = 一个气泡 |
+| 对话发送 | UTF-8 / GBK / HEX + 文本后缀可选 |
+| VT100 档位 | 交互终端：按键/粘贴发送、可选本地回显 |
+| 实现 | Chat 订 rxHub；VT100 用 `@xterm/xterm` + FitAddon |
+| 清屏 | Chat 仅清本视图镜像；VT100 `reset` 本终端；均不强制清全局日志 |
+
+### 不做
+
+本地 PTY/SSH；完整终端偏好中心；自写 ANSI 解析。
+
+### 视图类型
+
+- `chat` → `ChatView.vue`
+- `vt100` → `Vt100View.vue`（仅写 RX 原始字节；TX 靠设备回显或本地回显）

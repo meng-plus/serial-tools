@@ -18,7 +18,8 @@
             <a-menu-item key="monitor">监控</a-menu-item>
             <a-menu-item key="chart">图表</a-menu-item>
             <a-menu-item key="tx_list">定时发送</a-menu-item>
-            <a-menu-item key="chat" disabled>对话（后续）</a-menu-item>
+            <a-menu-item key="chat">对话</a-menu-item>
+            <a-menu-item key="vt100">VT100 终端</a-menu-item>
           </a-menu>
         </template>
       </a-dropdown>
@@ -42,6 +43,8 @@
           <MonitorView v-else-if="v.type === 'monitor'" :channel-id="channelId" />
           <ChartView v-else-if="v.type === 'chart'" :channel-id="channelId" :view-id="v.id" />
           <TxListView v-else-if="v.type === 'tx_list'" :channel-id="channelId" />
+          <ChatView v-else-if="v.type === 'chat'" :channel-id="channelId" />
+          <Vt100View v-else-if="v.type === 'vt100'" :channel-id="channelId" :view-id="v.id" />
           <a-empty v-else description="该视图类型尚未实现" />
         </div>
       </a-tab-pane>
@@ -59,6 +62,8 @@ import ParsedLogView from '@/views/ParsedLogView.vue'
 import MonitorView from '@/views/MonitorView.vue'
 import ChartView from '@/views/ChartView.vue'
 import TxListView from '@/views/TxListView.vue'
+import ChatView from '@/views/ChatView.vue'
+import Vt100View from '@/views/Vt100View.vue'
 
 const route = useRoute()
 const router = useRouter()

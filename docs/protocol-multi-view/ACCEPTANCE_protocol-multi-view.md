@@ -9,4 +9,4 @@
 | rxHub 唯一订 `rx-data`；terminal 订 hub | 是 |
 | regex / json 规则匹配 + 数值进 valueBus | 是 |
 | `npm test` 42 passed；`vue-tsc --noEmit` 通过 | 是 |
-| Chart / Workspace 导出 / 定时发送 / 对话 | Chart / 整包 I/O / 定时发送 v2 **已完成**；对话待办 |
+| Chart / Workspace 导出 / 定时发送 / 对话 | Chart / 整包 I/O / 定时发送 v2 / 对话+VT100 **已完成** |

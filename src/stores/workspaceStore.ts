@@ -9,6 +9,7 @@ const VIEW_TITLES: Record<ViewType, string> = {
   chart: '图表',
   tx_list: '定时发送',
   chat: '对话',
+  vt100: 'VT100',
 }
 
 let viewSeq = 0

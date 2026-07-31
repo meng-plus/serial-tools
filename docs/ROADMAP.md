@@ -17,7 +17,8 @@
 - 设计见 [protocol-multi-view/DESIGN_protocol-multi-view.md](./protocol-multi-view/DESIGN_protocol-multi-view.md)
 - ✅ rxHub + regex/JSON + valueBus + 通道工作区（收发/解析/监控/图表）
 - ✅ Workspace 整包 YAML/JSON 导入导出；定时发送 v2（每条独立周期/次数/变量）
-- 下一步：对话视图（可选 VT100）
+- ✅ 对话气泡 + VT100 交互终端（xterm.js）
+- 下一步：终端偏好增强 / 其它协议（按需）
 
 ### P1 — 终端效率
 

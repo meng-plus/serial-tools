@@ -10,8 +10,14 @@
 | C | Workspace I/O | version:1 整包导入导出（规则已可会话保存） | **已完成** |
 | D | 发送编排 | txPlanner、frameBuilder、TxListView | **已完成** |
 | D2 | 定时发送 v2 | 每条独立周期/次数/变量目录+展开 | **已完成** |
-| E | 对话/VT100 | chat 视图；VT100 另项 | 待办 |
+| E | 对话/VT100 | ChatView + Vt100View（xterm） | **已完成** |
 | DOC | 文档对齐 | DESIGN / TASK / ARCHITECTURE / ROADMAP | **已完成** |
+
+## Phase E 文件
+
+- `src/views/ChatView.vue` — 气泡对话
+- `src/views/Vt100View.vue` — `@xterm/xterm` + FitAddon
+- `ViewType` 增加 `vt100`
 
 ## Phase C / D 文件
 

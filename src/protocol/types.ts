@@ -65,7 +65,7 @@ export interface ValueSample {
   ruleId: string
 }
 
-export type ViewType = 'terminal' | 'parsed_log' | 'monitor' | 'chart' | 'tx_list' | 'chat'
+export type ViewType = 'terminal' | 'parsed_log' | 'monitor' | 'chart' | 'tx_list' | 'chat' | 'vt100'
 
 export interface ViewInstance {
   id: string
