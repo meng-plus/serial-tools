@@ -3,10 +3,13 @@
     <a-layout class="app-layout">
       <a-layout-sider v-model:collapsed="collapsed" :trigger="null" collapsible theme="dark" :width="220">
         <div class="logo">
-          <ApiOutlined v-if="collapsed" class="logo-icon" />
+          <img v-if="collapsed" src="/app-icon.png" alt="" class="logo-img" />
           <template v-else>
-            <div class="logo-text">Serial Tools</div>
-            <div class="logo-sub">通信集成调试平台</div>
+            <img src="/app-icon.png" alt="" class="logo-img-inline" />
+            <div class="logo-copy">
+              <div class="logo-text">Serial Tools</div>
+              <div class="logo-sub">通信集成调试平台</div>
+            </div>
           </template>
         </div>
         <a-menu
@@ -65,7 +68,7 @@ import zhCN from 'ant-design-vue/es/locale/zh_CN'
 import {
   LinkOutlined, CodeOutlined, BugOutlined, SwapOutlined,
   FileTextOutlined, SettingOutlined, MenuUnfoldOutlined,
-  MenuFoldOutlined, ApiOutlined, InfoCircleOutlined,
+  MenuFoldOutlined, InfoCircleOutlined,
 } from '@ant-design/icons-vue'
 import { useConnectionStore, useTerminalStore, useLogStore } from './stores'
 import { isTauri } from './api/tauri'
@@ -120,26 +123,45 @@ onUnmounted(() => {
 }
 
 .logo {
-  padding: 16px;
-  text-align: center;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  min-height: 64px;
 }
 
-.logo-icon {
-  font-size: 24px;
-  color: #1677ff;
+.logo-img {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+
+.logo-img-inline {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.logo-copy {
+  text-align: left;
+  min-width: 0;
 }
 
 .logo-text {
   color: #fff;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
+  line-height: 1.2;
 }
 
 .logo-sub {
   color: rgba(255, 255, 255, 0.45);
   font-size: 11px;
   margin-top: 2px;
+  line-height: 1.2;
 }
 
 .header {

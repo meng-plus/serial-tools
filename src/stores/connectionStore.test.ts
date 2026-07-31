@@ -11,9 +11,21 @@ vi.mock('@/api/events', () => ({
   onLogEntry: vi.fn(() => Promise.resolve(() => {})),
 }))
 
+const messageInfo = vi.fn()
+const messageError = vi.fn()
+vi.mock('ant-design-vue', () => ({
+  message: {
+    info: (...args: unknown[]) => messageInfo(...args),
+    error: (...args: unknown[]) => messageError(...args),
+    success: vi.fn(),
+    warning: vi.fn(),
+  },
+}))
+
 import { setActivePinia, createPinia } from 'pinia'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { invoke } from '@/api/tauri'
+import { onConnectionChanged } from '@/api/events'
 
 describe('connectionStore', () => {
   beforeEach(() => {
@@ -188,5 +200,62 @@ describe('connectionStore', () => {
     await store.disconnectClient('tcp_client-127.0.0.1:1')
     expect(invoke).toHaveBeenCalledWith('disconnect_client', { channelId: 'tcp_client-127.0.0.1:1' })
     expect(store.channelList.find(c => c.channelId === 'tcp_client-127.0.0.1:1')).toBeUndefined()
+  })
+
+  it('should toast 已断开 on remote disconnect and 服务异常 on error', async () => {
+    const store = useConnectionStore()
+    let handler: ((p: any) => void) | null = null
+    vi.mocked(onConnectionChanged).mockImplementation(async (h) => {
+      handler = h
+      return () => {}
+    })
+    vi.mocked(invoke).mockResolvedValue([])
+    await store.init()
+
+    store.channelList.push({
+      channelId: 'tcp-127.0.0.1:5000',
+      connected: true,
+      transportType: 'tcp_client',
+      portName: '127.0.0.1:5000',
+      clients: [],
+    })
+
+    handler!({
+      channel_id: 'tcp-127.0.0.1:5000',
+      connected: false,
+      transport_type: 'tcp_client',
+      port_name: '127.0.0.1:5000',
+      reason: 'remote',
+    })
+    expect(messageInfo).toHaveBeenCalledWith('127.0.0.1:5000 已断开')
+
+    store.channelList.push({
+      channelId: 'tcp-127.0.0.1:5001',
+      connected: true,
+      transportType: 'tcp_client',
+      portName: '127.0.0.1:5001',
+      clients: [],
+    })
+    handler!({
+      channel_id: 'tcp-127.0.0.1:5001',
+      connected: false,
+      transport_type: 'tcp_client',
+      port_name: '127.0.0.1:5001',
+      reason: 'error',
+    })
+    expect(messageError).toHaveBeenCalledWith('127.0.0.1:5001 服务异常')
+
+    // 本端主动断开不弹对端提示
+    messageInfo.mockClear()
+    messageError.mockClear()
+    handler!({
+      channel_id: 'tcp-x',
+      connected: false,
+      transport_type: 'tcp_client',
+      port_name: 'x',
+      reason: 'local',
+    })
+    expect(messageInfo).not.toHaveBeenCalled()
+    expect(messageError).not.toHaveBeenCalled()
   })
 })

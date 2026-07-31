@@ -160,4 +160,5 @@ MIT License
 
 **mengplus（蒙蒙plus）**
 - Email: chengmeng_2@outlook.com
-- Gitea: https://gitea.mengplus.top/gltech/serial-tools
+- Gitea: https://gitea.mengplus.top/mengplus/serial-tools
+- QQ 群: 790012859

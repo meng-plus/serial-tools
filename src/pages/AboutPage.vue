@@ -1,23 +1,23 @@
 <template>
   <div class="about-page">
-    <a-card :bordered="false" class="about-card">
+    <a-card :bordered="false" class="about-card" size="small">
       <div class="about-header">
-        <div class="app-icon">
-          <ApiOutlined style="font-size: 48px; color: #1677ff" />
+        <img src="/app-icon.png" alt="Serial Tools" class="app-logo" />
+        <div class="header-text">
+          <h1 class="app-name">Serial Tools</h1>
+          <span class="app-desc">通信集成调试平台</span>
+          <a-tag color="blue" class="ver-tag">v0.1.0</a-tag>
         </div>
-        <h1 class="app-name">Serial Tools</h1>
-        <p class="app-desc">通信集成调试平台</p>
-        <a-tag color="blue">v0.1.0</a-tag>
       </div>
 
-      <a-divider />
+      <a-divider class="tight-divider" />
 
       <div class="about-section">
         <h3>功能特性</h3>
-        <a-row :gutter="[16, 12]">
+        <a-row :gutter="[12, 8]">
           <a-col :span="12" v-for="feat in features" :key="feat.title">
             <div class="feature-item">
-              <component :is="feat.icon" style="font-size: 18px; color: #1677ff; margin-right: 8px" />
+              <component :is="feat.icon" class="feat-icon" />
               <div>
                 <div class="feature-title">{{ feat.title }}</div>
                 <div class="feature-desc">{{ feat.desc }}</div>
@@ -27,43 +27,26 @@
         </a-row>
       </div>
 
-      <a-divider />
+      <a-divider class="tight-divider" />
 
       <div class="about-section">
         <h3>技术栈</h3>
-        <a-space wrap>
+        <a-space wrap size="small">
           <a-tag v-for="tech in techStack" :key="tech" color="geekblue">{{ tech }}</a-tag>
         </a-space>
       </div>
 
-      <a-divider />
+      <a-divider class="tight-divider" />
 
-      <div class="about-section">
-        <h3>关于作者</h3>
+      <div class="about-section about-footer">
         <div class="author-info">
-          <div class="author-row">
-            <UserOutlined style="margin-right: 8px" />
-            <span class="author-name">mengplus（蒙蒙plus）</span>
-          </div>
-          <div class="author-row">
-            <MailOutlined style="margin-right: 8px" />
-            <a href="mailto:chengmeng_2@outlook.com">chengmeng_2@outlook.com</a>
-          </div>
-          <div class="author-row">
-            <LinkOutlined style="margin-right: 8px" />
-            <a href="https://gitea.mengplus.top/gltech/serial-tools" target="_blank" rel="noopener">
-              Gitea 仓库
-            </a>
-          </div>
+          <span><UserOutlined /> mengplus（蒙蒙plus）</span>
+          <a href="mailto:chengmeng_2@outlook.com"><MailOutlined /> chengmeng_2@outlook.com</a>
+          <a class="qq-link" href="#" @click.prevent="joinQqGroup" title="点击尝试打开 QQ 加群，失败则复制群号">
+            <TeamOutlined /> QQ群 {{ QQ_GROUP }}
+          </a>
         </div>
-      </div>
-
-      <a-divider />
-
-      <div class="about-section">
-        <h3>开源许可</h3>
-        <p class="license-text">本项目基于 MIT 许可证开源。</p>
-        <p class="copyright">Copyright © 2026 mengplus</p>
+        <div class="license-line">MIT · Copyright © 2026 mengplus</div>
       </div>
     </a-card>
   </div>
@@ -71,10 +54,17 @@
 
 <script setup lang="ts">
 import {
-  ApiOutlined, UserOutlined, MailOutlined, LinkOutlined,
+  UserOutlined, MailOutlined, TeamOutlined,
   SwapOutlined, CodeOutlined, FileTextOutlined, BugOutlined,
   HddOutlined,
 } from '@ant-design/icons-vue'
+import { message } from 'ant-design-vue'
+import { isTauri } from '@/api/tauri'
+
+const QQ_GROUP = '790012859'
+/** QQ 客户端加群协议（无邀请码时尽力打开群资料） */
+const QQ_GROUP_URI =
+  `mqqapi://card/show_pslcard?src_type=internal&version=1&uin=${QQ_GROUP}&card_type=group&source=qrcode`
 
 const features = [
   { title: '多协议支持', desc: 'UART / TCP / UDP / MQTT', icon: SwapOutlined },
@@ -88,72 +78,130 @@ const features = [
 const techStack = [
   'Rust', 'Tauri v2', 'Vue 3', 'TypeScript', 'Pinia', 'Ant Design Vue', 'tokio', 'serialport',
 ]
+
+async function copyGroupId() {
+  try {
+    await navigator.clipboard.writeText(QQ_GROUP)
+    message.success(`群号 ${QQ_GROUP} 已复制，可在 QQ 中搜索加群`)
+  } catch {
+    message.info(`QQ 群号：${QQ_GROUP}`)
+  }
+}
+
+async function joinQqGroup() {
+  let opened = false
+  if (isTauri()) {
+    try {
+      const { open } = await import('@tauri-apps/plugin-shell')
+      await open(QQ_GROUP_URI)
+      opened = true
+    } catch {
+      // shell 可能不允许自定义协议，回退复制
+    }
+  }
+  if (opened) {
+    message.success('正在唤起 QQ…若未打开请手动搜索群号')
+    // 同时复制，防止唤起失败
+    try { await navigator.clipboard.writeText(QQ_GROUP) } catch { /* ignore */ }
+  } else {
+    await copyGroupId()
+  }
+}
 </script>
 
 <style scoped>
 .about-page {
-  max-width: 720px;
+  max-width: 640px;
   margin: 0 auto;
 }
 .about-card {
-  border-radius: 12px;
+  border-radius: 8px;
+}
+.about-card :deep(.ant-card-body) {
+  padding: 16px 20px;
 }
 .about-header {
-  text-align: center;
-  padding: 20px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
-.app-icon {
-  margin-bottom: 12px;
+.app-logo {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+.header-text {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 .app-name {
-  font-size: 24px;
+  font-size: 18px;
   font-weight: 700;
-  margin: 0 0 4px;
+  margin: 0;
   color: rgba(0, 0, 0, 0.88);
 }
 .app-desc {
   color: rgba(0, 0, 0, 0.45);
-  margin: 0 0 12px;
+  font-size: 13px;
+}
+.ver-tag {
+  margin: 0;
+}
+.tight-divider {
+  margin: 12px 0;
 }
 .about-section h3 {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
-  margin-bottom: 12px;
+  margin: 0 0 8px;
   color: rgba(0, 0, 0, 0.88);
 }
 .feature-item {
   display: flex;
   align-items: flex-start;
+  gap: 6px;
+}
+.feat-icon {
+  font-size: 14px;
+  color: #1677ff;
+  margin-top: 2px;
 }
 .feature-title {
   font-weight: 500;
-  font-size: 13px;
+  font-size: 12px;
+  line-height: 1.3;
 }
 .feature-desc {
   color: rgba(0, 0, 0, 0.45);
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 1.3;
+}
+.about-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 .author-info {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.author-row {
-  display: flex;
-  align-items: center;
-  color: rgba(0, 0, 0, 0.65);
-}
-.author-name {
-  font-weight: 600;
-  font-size: 15px;
-  color: rgba(0, 0, 0, 0.88);
-}
-.license-text {
-  color: rgba(0, 0, 0, 0.65);
-  margin-bottom: 4px;
-}
-.copyright {
-  color: rgba(0, 0, 0, 0.45);
+  flex-wrap: wrap;
+  gap: 12px;
   font-size: 12px;
+  color: rgba(0, 0, 0, 0.65);
+}
+.author-info a {
+  color: #1677ff;
+}
+.qq-link {
+  cursor: pointer;
+  user-select: none;
+}
+.license-line {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.45);
 }
 </style>

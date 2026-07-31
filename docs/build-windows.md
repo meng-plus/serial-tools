@@ -6,7 +6,7 @@
 
 ```cmd
 :: 1. 克隆
-git clone https://mengplus:meng24364@gitea.mengplus.top/gltech/serial-tools.git
+git clone https://gitea.mengplus.top/mengplus/serial-tools.git
 cd serial-tools
 
 :: 2. 安装依赖

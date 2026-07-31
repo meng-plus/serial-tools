@@ -25,6 +25,7 @@ function mockSend(channelId: string, text: string, hex?: string) {
     hex: encoded,
     text,
     channel_id: channelId,
+    seq: Math.floor(Math.random() * 100000) + 1,
   }
 }
 
@@ -157,6 +158,25 @@ describe('terminalStore', () => {
     store.addLine('rx', 'ch1', 'e4b8ad', '中', [0xe4, 0xb8, 0xad], '12:00:00.001', 7)
     store.addLine('rx', 'ch1', 'e4b8ad', '中', [0xe4, 0xb8, 0xad], '12:00:00.001')
     expect(store.lines).toHaveLength(1)
+  })
+
+  it('should dedupe by seq even when text differs', () => {
+    const store = useTerminalStore()
+    store.addLine('rx', 'ch1', 'e4b8ad', '中', [0xe4, 0xb8, 0xad], '12:00:00.001', 9)
+    store.addLine('rx', 'ch1', 'e4b8ad', '�', [0xe4, 0xb8, 0xad], '12:00:00.001', 9)
+    expect(store.lines).toHaveLength(1)
+  })
+
+  it('should prefer event subscription and skip polling', async () => {
+    const store = useTerminalStore()
+    const { invoke } = await import('@/api/tauri')
+    const { onRxData } = await import('@/api/events')
+    vi.mocked(invoke).mockResolvedValue({ packets: [], total: 0 })
+    vi.mocked(onRxData).mockResolvedValue(() => {})
+
+    await store.init()
+    expect(store.eventDriven).toBe(true)
+    store.dispose()
   })
 
   it('should display text based on encoding', () => {

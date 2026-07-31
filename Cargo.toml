@@ -10,7 +10,7 @@ version = "0.1.0"
 edition = "2021"
 authors = ["mengplus <chengmeng_2@outlook.com>"]
 license = "MIT"
-repository = "https://gitea.mengplus.top/gltech/serial-tools.git"
+repository = "https://gitea.mengplus.top/mengplus/serial-tools.git"
 
 [workspace.dependencies]
 tokio = { version = "1", features = ["full"] }

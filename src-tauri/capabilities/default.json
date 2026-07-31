@@ -6,6 +6,15 @@
   "permissions": [
     "core:default",
     "core:event:default",
-    "shell:allow-open"
+    {
+      "identifier": "shell:allow-open",
+      "allow": [
+        { "url": "https://*" },
+        { "url": "http://*" },
+        { "url": "mailto:*" },
+        { "url": "mqqapi:*" },
+        { "url": "tencent:*" }
+      ]
+    }
   ]
 }

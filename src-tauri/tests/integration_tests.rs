@@ -150,6 +150,7 @@ async fn test_appstate_push_packet() {
         bytes: b"hello".to_vec(),
         hex: "68656c6c6f".to_string(),
         text: "hello".to_string(),
+        seq: 1,
     };
 
     state.push_packet(entry).await;
@@ -173,6 +174,7 @@ async fn test_appstate_packet_overflow_trim() {
             bytes: vec![i as u8],
             hex: format!("{:02x}", i as u8),
             text: String::new(),
+            seq: i as u64 + 1,
         };
         state.push_packet(entry).await;
     }

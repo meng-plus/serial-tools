@@ -20,6 +20,7 @@ pub struct SendDataResponse {
     pub hex: String,
     pub text: String,
     pub channel_id: String,
+    pub seq: u64,
 }
 
 #[derive(serde::Serialize)]
@@ -91,6 +92,7 @@ pub async fn send_data(
     let timestamp = chrono::Local::now().format("%H:%M:%S%.3f").to_string();
     let hex_str = hex::encode(&bytes);
     let text = String::from_utf8_lossy(&bytes).to_string();
+    let seq = state.next_seq();
 
     let entry = PacketEntry {
         timestamp: timestamp.clone(),
@@ -99,6 +101,7 @@ pub async fn send_data(
         bytes: bytes.clone(),
         hex: hex_str.clone(),
         text: text.clone(),
+        seq,
     };
     state.push_packet(entry).await;
 
@@ -109,6 +112,7 @@ pub async fn send_data(
         hex: hex_str,
         text,
         channel_id,
+        seq,
     })
 }
 

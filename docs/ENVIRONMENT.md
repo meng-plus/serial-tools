@@ -203,7 +203,7 @@ cargo test --test integration_tests  # 集成测试
 项目提供 Docker 镜像用于 CI 环境：
 
 ```bash
-docker pull gitea.mengplus.top/gltech/doi-studio-ci:latest
+docker pull gitea.mengplus.top/mengplus/doi-studio-ci:latest
 ```
 
 镜像内包含 Rust 工具链、Node.js 和所有构建依赖。

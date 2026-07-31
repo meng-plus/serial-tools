@@ -97,7 +97,10 @@ impl Transport for TcpClientTransport {
                 // 超时/无数据：返回错误让读线程短暂休眠，勿当成 EOF(Ok(0))
                 Err(TransportError::Receive(e.to_string()))
             }
-            Err(e) => Err(TransportError::Receive(e.to_string())),
+            Err(e) => {
+                // 保留 ErrorKind，便于上层区分 RST 与临时错误
+                Err(TransportError::Io(e))
+            }
         }
     }
 
@@ -166,9 +169,14 @@ impl TcpServerTransport {
         *self.bound_port.lock().unwrap()
     }
 
-    /// 踢出指定客户端
+    /// 踢出指定客户端（先 Shutdown::Both 发 FIN，避免对端视作 RST/异常断开）
     pub fn kick_client(&self, addr: SocketAddr) -> bool {
-        self.clients.lock().unwrap().remove(&addr).is_some()
+        if let Some(stream) = self.clients.lock().unwrap().remove(&addr) {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+            true
+        } else {
+            false
+        }
     }
 
     /// 向指定客户端发送数据
@@ -244,7 +252,13 @@ impl Transport for TcpServerTransport {
     fn shutdown(&self) -> Result<(), TransportError> {
         *self.running.lock().unwrap() = false;
         *self.listener.lock().unwrap() = None;
-        self.clients.lock().unwrap().clear();
+        // 主动关闭：对每个客户端发 FIN，再丢弃句柄（与 sscom 正常断开一致）
+        {
+            let mut clients = self.clients.lock().unwrap();
+            for (_, stream) in clients.drain() {
+                let _ = stream.shutdown(std::net::Shutdown::Both);
+            }
+        }
         self.new_clients.lock().unwrap().clear();
         self.pending.lock().unwrap().clear();
         if let Some(handle) = self.accept_handle.lock().unwrap().take() {

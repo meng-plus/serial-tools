@@ -17,6 +17,8 @@ export interface ConnectionEventPayload {
   port_name: string
   parent_channel_id?: string | null
   server_clients?: string[] | null
+  /** local=本端主动 / remote=对端优雅关闭 / error=异常断开 */
+  reason?: string | null
 }
 
 export interface LogEventPayload {

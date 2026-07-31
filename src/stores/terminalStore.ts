@@ -30,6 +30,17 @@ interface SendResult {
   hex: string
   text: string
   channel_id: string
+  seq?: number
+}
+
+interface PacketRow {
+  timestamp: string
+  direction: string
+  channel_id: string
+  bytes: number[]
+  hex: string
+  text: string
+  seq?: number
 }
 
 export const useTerminalStore = defineStore('terminal', () => {
@@ -43,9 +54,11 @@ export const useTerminalStore = defineStore('terminal', () => {
   })
   let lineIdCounter = 0
   let unlisten: (() => void) | null = null
-  /** 内容指纹去重：事件 / 轮询 / 本地发送 共用 */
+  /** seq 优先；无 seq 时用内容指纹 */
   const seenKeys = new Set<string>()
-  let eventListening = false
+  const eventDriven = ref(false)
+  let pollTimer: ReturnType<typeof setInterval> | null = null
+  let initPromise: Promise<void> | null = null
 
   const activeChannelId = ref<string>('')
 
@@ -74,17 +87,14 @@ export const useTerminalStore = defineStore('terminal', () => {
     filteredLines.value.filter(l => l.direction === 'tx').length
   )
 
-  let pollTimer: ReturnType<typeof setInterval> | null = null
-
-  /** 统一内容键：同一包无论来自事件还是轮询都相同 */
   function contentKey(
     direction: string,
     channelId: string,
     timestamp: string,
     hex: string,
-    text: string
   ) {
-    return `${direction}|${channelId}|${timestamp}|${hex}|${text}`
+    // 不含 text：避免 UTF-8 替换字符等导致事件/历史键不一致
+    return `${direction}|${channelId}|${timestamp}|${hex.toLowerCase()}`
   }
 
   function addLine(
@@ -100,14 +110,16 @@ export const useTerminalStore = defineStore('terminal', () => {
       || (new Date().toLocaleTimeString('en-US', { hour12: false })
         + '.' + String(Date.now() % 1000).padStart(3, '0'))
 
-    const ckey = contentKey(direction, channelId, ts, hex, text)
-    if (seenKeys.has(ckey)) return
+    const normalizedHex = (hex || '').toLowerCase()
 
     if (seq != null && seq > 0) {
       const skey = `seq:${seq}`
       if (seenKeys.has(skey)) return
       seenKeys.add(skey)
     }
+
+    const ckey = contentKey(direction, channelId, ts, normalizedHex)
+    if (seenKeys.has(ckey)) return
     seenKeys.add(ckey)
 
     lines.value.push({
@@ -115,7 +127,7 @@ export const useTerminalStore = defineStore('terminal', () => {
       timestamp: ts,
       direction,
       channelId,
-      hex,
+      hex: normalizedHex,
       text,
       rawBytes,
       seq,
@@ -124,82 +136,105 @@ export const useTerminalStore = defineStore('terminal', () => {
       const drop = lines.value.length - maxLines.value + 1000
       const removed = lines.value.splice(0, drop)
       for (const r of removed) {
-        seenKeys.delete(contentKey(r.direction, r.channelId, r.timestamp, r.hex, r.text))
+        seenKeys.delete(contentKey(r.direction, r.channelId, r.timestamp, r.hex))
         if (r.seq != null && r.seq > 0) seenKeys.delete(`seq:${r.seq}`)
       }
     }
   }
 
-  async function init() {
-    // 防止重复 init 导致双订阅
-    dispose()
+  function ingestPacket(pkt: PacketRow) {
+    addLine(
+      pkt.direction as 'rx' | 'tx',
+      pkt.channel_id,
+      pkt.hex || '',
+      pkt.text || '',
+      pkt.bytes || hexToBytes(pkt.hex || ''),
+      pkt.timestamp,
+      pkt.seq && pkt.seq > 0 ? pkt.seq : undefined
+    )
+  }
 
+  async function loadHistory(limit = 500) {
     try {
-      const result = await invoke<{ packets: Array<{
-        timestamp: string; direction: string; channel_id: string;
-        bytes: number[]; hex: string; text: string
-      }>; total: number }>('get_packets', { limit: 500 })
+      const result = await invoke<{ packets: PacketRow[]; total: number }>(
+        'get_packets',
+        { limit }
+      )
       for (const pkt of [...result.packets].reverse()) {
-        addLine(
-          pkt.direction as 'rx' | 'tx',
-          pkt.channel_id,
-          pkt.hex,
-          pkt.text,
-          pkt.bytes || [],
-          pkt.timestamp
-        )
+        ingestPacket(pkt)
       }
     } catch { /* ignore */ }
+  }
 
-    try {
-      unlisten = await onRxData((payload: RxEventPayload) => {
-        const rawBytes = hexToBytes(payload.bytes_hex || payload.hex)
-        addLine(
-          'rx',
-          payload.channel_id,
-          payload.hex,
-          payload.text,
-          rawBytes,
-          payload.timestamp,
-          payload.seq
-        )
-      })
-      eventListening = true
-    } catch (e) {
-      console.warn('[terminal] onRxData failed, fallback to polling only', e)
-      eventListening = false
+  function stopPolling() {
+    if (pollTimer) {
+      clearInterval(pollTimer)
+      pollTimer = null
     }
+  }
 
-    // 有事件时放慢轮询；仅补漏，靠 contentKey 去重
-    const interval = eventListening ? 1500 : 400
+  /** 仅在事件订阅失败时作为兜底 */
+  function startPollingFallback() {
+    stopPolling()
     pollTimer = setInterval(async () => {
       try {
-        const result = await invoke<{ packets: Array<{
-          timestamp: string; direction: string; channel_id: string;
-          bytes: number[]; hex: string; text: string
-        }>; total: number }>('get_packets', { limit: 100 })
+        const result = await invoke<{ packets: PacketRow[]; total: number }>(
+          'get_packets',
+          { limit: 100 }
+        )
         for (const pkt of [...result.packets].reverse()) {
-          addLine(
-            pkt.direction as 'rx' | 'tx',
-            pkt.channel_id,
-            pkt.hex,
-            pkt.text,
-            pkt.bytes || [],
-            pkt.timestamp
-          )
+          ingestPacket(pkt)
         }
       } catch { /* ignore */ }
-    }, interval)
+    }, 400)
+  }
+
+  async function init() {
+    // 串行化，避免并发 init 双订阅
+    if (initPromise) {
+      await initPromise
+      return
+    }
+    initPromise = (async () => {
+      dispose()
+      await loadHistory(500)
+
+      try {
+        unlisten = await onRxData((payload: RxEventPayload) => {
+          const hex = payload.hex || payload.bytes_hex || ''
+          const rawBytes = payload.bytes?.length
+            ? payload.bytes
+            : hexToBytes(hex)
+          addLine(
+            'rx',
+            payload.channel_id,
+            hex,
+            payload.text || '',
+            rawBytes,
+            payload.timestamp,
+            payload.seq
+          )
+        })
+        eventDriven.value = true
+      } catch (e) {
+        console.warn('[terminal] onRxData failed, fallback to polling', e)
+        eventDriven.value = false
+        startPollingFallback()
+      }
+    })()
+
+    try {
+      await initPromise
+    } finally {
+      initPromise = null
+    }
   }
 
   function dispose() {
     unlisten?.()
     unlisten = null
-    eventListening = false
-    if (pollTimer) {
-      clearInterval(pollTimer)
-      pollTimer = null
-    }
+    eventDriven.value = false
+    stopPolling()
   }
 
   function displayText(line: TerminalLine): string {
@@ -237,7 +272,7 @@ export const useTerminalStore = defineStore('terminal', () => {
       const result = await invoke<SendResult>('send_data', {
         request: { channel_id: channelId, data: hex, format: 'hex', suffix: 'none' },
       })
-      addLine('tx', result.channel_id, result.hex, result.text, hexToBytes(result.hex), result.timestamp)
+      addLine('tx', result.channel_id, result.hex, result.text, hexToBytes(result.hex), result.timestamp, result.seq)
       return
     }
 
@@ -249,14 +284,15 @@ export const useTerminalStore = defineStore('terminal', () => {
         suffix,
       },
     })
-    // 只用后端回包入账一次；轮询看到同一 timestamp+hex 会被 contentKey 丢掉
+    // 仅用后端回包入账；无轮询时不会二次插入
     addLine(
       'tx',
       result.channel_id,
       result.hex,
       result.text,
       hexToBytes(result.hex),
-      result.timestamp
+      result.timestamp,
+      result.seq
     )
   }
 
@@ -265,7 +301,7 @@ export const useTerminalStore = defineStore('terminal', () => {
     const result = await invoke<SendResult>('send_data', {
       request: { channel_id: channelId, data: clean, format: 'hex', suffix: 'none' },
     })
-    addLine('tx', result.channel_id, result.hex, result.text, hexToBytes(result.hex), result.timestamp)
+    addLine('tx', result.channel_id, result.hex, result.text, hexToBytes(result.hex), result.timestamp, result.seq)
   }
 
   async function clear() {
@@ -285,6 +321,7 @@ export const useTerminalStore = defineStore('terminal', () => {
 
   return {
     lines, encoding, maxLines, displayConfig, activeChannelId, filteredLines, rxCount, txCount,
+    eventDriven,
     init, dispose, addLine, sendText, sendHex, clear, displayText,
   }
 })

@@ -24,6 +24,35 @@ pub enum TransportError {
     Io(#[from] std::io::Error),
 }
 
+impl TransportError {
+    /// 对端异常断开（RST / 中止 / 管道破裂），区别于优雅 FIN(Ok(0))
+    pub fn is_fatal_disconnect(&self) -> bool {
+        fn msg_is_fatal(msg: &str) -> bool {
+            let lower = msg.to_lowercase();
+            lower.contains("connection reset")
+                || lower.contains("connection aborted")
+                || lower.contains("broken pipe")
+                || lower.contains("forcibly closed")
+                || lower.contains("软件中止")
+                || lower.contains("强制关闭")
+        }
+        match self {
+            TransportError::Receive(msg) | TransportError::Send(msg) | TransportError::Connect(msg) => {
+                msg_is_fatal(msg)
+            }
+            TransportError::Io(e) => {
+                matches!(
+                    e.kind(),
+                    std::io::ErrorKind::ConnectionReset
+                        | std::io::ErrorKind::ConnectionAborted
+                        | std::io::ErrorKind::BrokenPipe
+                ) || msg_is_fatal(&e.to_string())
+            }
+            _ => false,
+        }
+    }
+}
+
 /// Duplex 模式（通道层能力声明）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -351,5 +380,25 @@ mod config_tests {
             }
             _ => panic!("wrong variant"),
         }
+    }
+}
+
+#[cfg(test)]
+mod fatal_disconnect_tests {
+    use super::TransportError;
+
+    #[test]
+    fn test_connection_reset_is_fatal() {
+        assert!(TransportError::Receive("Connection reset by peer".into()).is_fatal_disconnect());
+        assert!(TransportError::Io(std::io::Error::from(std::io::ErrorKind::ConnectionReset))
+            .is_fatal_disconnect());
+        assert!(TransportError::Receive("An existing connection was forcibly closed".into())
+            .is_fatal_disconnect());
+    }
+
+    #[test]
+    fn test_timeout_is_not_fatal() {
+        assert!(!TransportError::Receive("timed out".into()).is_fatal_disconnect());
+        assert!(!TransportError::NotConnected.is_fatal_disconnect());
     }
 }

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { message } from 'ant-design-vue'
 import { invoke } from '@/api'
 import { onConnectionChanged, type ConnectionEventPayload } from '@/api/events'
 
@@ -151,6 +152,13 @@ export const useConnectionStore = defineStore('connection', () => {
             parent.clients.filter(a => a !== payload.port_name)
           )
         }
+      }
+
+      // 对端发起的断开：区分优雅 / 异常（本端主动由按钮 handler 提示，避免重复）
+      if (payload.reason === 'remote') {
+        message.info(`${payload.port_name || payload.channel_id} 已断开`)
+      } else if (payload.reason === 'error') {
+        message.error(`${payload.port_name || payload.channel_id} 服务异常`)
       }
     }
 
