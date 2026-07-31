@@ -23,6 +23,15 @@ export interface DisplayConfig {
   showChannel: boolean
 }
 
+interface SendResult {
+  success: boolean
+  bytes_sent: number
+  timestamp: string
+  hex: string
+  text: string
+  channel_id: string
+}
+
 export const useTerminalStore = defineStore('terminal', () => {
   const lines = ref<TerminalLine[]>([])
   const encoding = ref<Encoding>('utf-8')
@@ -34,7 +43,9 @@ export const useTerminalStore = defineStore('terminal', () => {
   })
   let lineIdCounter = 0
   let unlisten: (() => void) | null = null
+  /** 内容指纹去重：事件 / 轮询 / 本地发送 共用 */
   const seenKeys = new Set<string>()
+  let eventListening = false
 
   const activeChannelId = ref<string>('')
 
@@ -65,8 +76,14 @@ export const useTerminalStore = defineStore('terminal', () => {
 
   let pollTimer: ReturnType<typeof setInterval> | null = null
 
-  function lineKey(direction: string, channelId: string, timestamp: string, hex: string, text: string, seq?: number) {
-    if (seq != null && seq > 0) return `seq:${seq}`
+  /** 统一内容键：同一包无论来自事件还是轮询都相同 */
+  function contentKey(
+    direction: string,
+    channelId: string,
+    timestamp: string,
+    hex: string,
+    text: string
+  ) {
     return `${direction}|${channelId}|${timestamp}|${hex}|${text}`
   }
 
@@ -79,14 +96,23 @@ export const useTerminalStore = defineStore('terminal', () => {
     timestamp?: string,
     seq?: number
   ) {
-    const ts = timestamp || new Date().toLocaleTimeString('en-US', { hour12: false }) + '.' + String(Date.now() % 1000).padStart(3, '0') + '-' + (++lineIdCounter)
-    const key = lineKey(direction, channelId, ts, hex, text, seq)
-    if (seenKeys.has(key)) return
-    seenKeys.add(key)
+    const ts = timestamp
+      || (new Date().toLocaleTimeString('en-US', { hour12: false })
+        + '.' + String(Date.now() % 1000).padStart(3, '0'))
+
+    const ckey = contentKey(direction, channelId, ts, hex, text)
+    if (seenKeys.has(ckey)) return
+
+    if (seq != null && seq > 0) {
+      const skey = `seq:${seq}`
+      if (seenKeys.has(skey)) return
+      seenKeys.add(skey)
+    }
+    seenKeys.add(ckey)
 
     lines.value.push({
-      id: lineIdCounter,
-      timestamp: timestamp || ts.split('-')[0],
+      id: ++lineIdCounter,
+      timestamp: ts,
       direction,
       channelId,
       hex,
@@ -98,13 +124,16 @@ export const useTerminalStore = defineStore('terminal', () => {
       const drop = lines.value.length - maxLines.value + 1000
       const removed = lines.value.splice(0, drop)
       for (const r of removed) {
-        seenKeys.delete(lineKey(r.direction, r.channelId, r.timestamp, r.hex, r.text, r.seq))
+        seenKeys.delete(contentKey(r.direction, r.channelId, r.timestamp, r.hex, r.text))
+        if (r.seq != null && r.seq > 0) seenKeys.delete(`seq:${r.seq}`)
       }
     }
   }
 
   async function init() {
-    // 历史包
+    // 防止重复 init 导致双订阅
+    dispose()
+
     try {
       const result = await invoke<{ packets: Array<{
         timestamp: string; direction: string; channel_id: string;
@@ -116,13 +145,12 @@ export const useTerminalStore = defineStore('terminal', () => {
           pkt.channel_id,
           pkt.hex,
           pkt.text,
-          pkt.bytes,
+          pkt.bytes || [],
           pkt.timestamp
         )
       }
     } catch { /* ignore */ }
 
-    // 事件订阅（主路径）
     try {
       unlisten = await onRxData((payload: RxEventPayload) => {
         const rawBytes = hexToBytes(payload.bytes_hex || payload.hex)
@@ -136,11 +164,14 @@ export const useTerminalStore = defineStore('terminal', () => {
           payload.seq
         )
       })
+      eventListening = true
     } catch (e) {
       console.warn('[terminal] onRxData failed, fallback to polling only', e)
+      eventListening = false
     }
 
-    // 轮询兜底：按未见过的包合并，不依赖 total 计数
+    // 有事件时放慢轮询；仅补漏，靠 contentKey 去重
+    const interval = eventListening ? 1500 : 400
     pollTimer = setInterval(async () => {
       try {
         const result = await invoke<{ packets: Array<{
@@ -158,12 +189,13 @@ export const useTerminalStore = defineStore('terminal', () => {
           )
         }
       } catch { /* ignore */ }
-    }, 400)
+    }, interval)
   }
 
   function dispose() {
     unlisten?.()
     unlisten = null
+    eventListening = false
     if (pollTimer) {
       clearInterval(pollTimer)
       pollTimer = null
@@ -202,14 +234,14 @@ export const useTerminalStore = defineStore('terminal', () => {
 
     if (format === 'hex') {
       const hex = text.replace(/\s+/g, '')
-      await invoke('send_data', {
+      const result = await invoke<SendResult>('send_data', {
         request: { channel_id: channelId, data: hex, format: 'hex', suffix: 'none' },
       })
-      addLine('tx', channelId, hex, '', [])
+      addLine('tx', result.channel_id, result.hex, result.text, hexToBytes(result.hex), result.timestamp)
       return
     }
 
-    await invoke('send_data', {
+    const result = await invoke<SendResult>('send_data', {
       request: {
         channel_id: channelId,
         data: text,
@@ -217,15 +249,23 @@ export const useTerminalStore = defineStore('terminal', () => {
         suffix,
       },
     })
-    addLine('tx', channelId, '', text, [])
+    // 只用后端回包入账一次；轮询看到同一 timestamp+hex 会被 contentKey 丢掉
+    addLine(
+      'tx',
+      result.channel_id,
+      result.hex,
+      result.text,
+      hexToBytes(result.hex),
+      result.timestamp
+    )
   }
 
   async function sendHex(channelId: string, hex: string) {
     const clean = hex.replace(/\s+/g, '')
-    await invoke('send_data', {
+    const result = await invoke<SendResult>('send_data', {
       request: { channel_id: channelId, data: clean, format: 'hex', suffix: 'none' },
     })
-    addLine('tx', channelId, clean, '', [])
+    addLine('tx', result.channel_id, result.hex, result.text, hexToBytes(result.hex), result.timestamp)
   }
 
   async function clear() {

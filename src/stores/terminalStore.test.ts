@@ -15,6 +15,19 @@ import { setActivePinia, createPinia } from 'pinia'
 import { useTerminalStore } from '@/stores/terminalStore'
 import { useConnectionStore } from '@/stores/connectionStore'
 
+function mockSend(channelId: string, text: string, hex?: string) {
+  const encoded = hex ?? Array.from(new TextEncoder().encode(text))
+    .map(b => b.toString(16).padStart(2, '0')).join('')
+  return {
+    success: true,
+    bytes_sent: encoded.length / 2,
+    timestamp: '12:00:00.000',
+    hex: encoded,
+    text,
+    channel_id: channelId,
+  }
+}
+
 describe('terminalStore', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -32,7 +45,7 @@ describe('terminalStore', () => {
   it('should add lines via sendText', async () => {
     const store = useTerminalStore()
     const { invoke } = await import('@/api/tauri')
-    vi.mocked(invoke).mockResolvedValue({ success: true, bytes_sent: 5 })
+    vi.mocked(invoke).mockResolvedValue(mockSend('ch1', 'hello'))
 
     await store.sendText('ch1', 'hello', 'none')
 
@@ -45,7 +58,7 @@ describe('terminalStore', () => {
   it('should add lines via sendHex', async () => {
     const store = useTerminalStore()
     const { invoke } = await import('@/api/tauri')
-    vi.mocked(invoke).mockResolvedValue({ success: true, bytes_sent: 3 })
+    vi.mocked(invoke).mockResolvedValue(mockSend('ch1', '', '010203'))
 
     await store.sendHex('ch1', '010203')
 
@@ -57,9 +70,11 @@ describe('terminalStore', () => {
   it('should filter by channel', async () => {
     const store = useTerminalStore()
     const { invoke } = await import('@/api/tauri')
-    vi.mocked(invoke).mockResolvedValue({ success: true, bytes_sent: 1 })
+    vi.mocked(invoke)
+      .mockResolvedValueOnce(mockSend('ch1', 'data1'))
+      .mockResolvedValueOnce(mockSend('ch2', 'data2'))
+      .mockResolvedValueOnce(mockSend('ch1', 'data3'))
 
-    // 添加来自不同通道的数据
     await store.sendText('ch1', 'data1')
     await store.sendText('ch2', 'data2')
     await store.sendText('ch1', 'data3')
@@ -77,7 +92,11 @@ describe('terminalStore', () => {
     const store = useTerminalStore()
     const conn = useConnectionStore()
     const { invoke } = await import('@/api/tauri')
-    vi.mocked(invoke).mockResolvedValue({ success: true, bytes_sent: 1 })
+    vi.mocked(invoke)
+      .mockResolvedValueOnce(mockSend('tcp_server-0.0.0.0:5000', 'server'))
+      .mockResolvedValueOnce(mockSend('tcp_client-192.168.1.5:12345', 'client1'))
+      .mockResolvedValueOnce(mockSend('tcp_client-192.168.1.6:12345', 'client2'))
+      .mockResolvedValueOnce(mockSend('serial-COM3', 'serial'))
 
     conn.channelList.push({
       channelId: 'tcp_server-0.0.0.0:5000',
@@ -121,14 +140,23 @@ describe('terminalStore', () => {
   it('should count rx and tx correctly', async () => {
     const store = useTerminalStore()
     const { invoke } = await import('@/api/tauri')
-    vi.mocked(invoke).mockResolvedValue({ success: true, bytes_sent: 1 })
+    vi.mocked(invoke)
+      .mockResolvedValueOnce(mockSend('ch1', 'rx1'))
+      .mockResolvedValueOnce(mockSend('ch1', 'rx2'))
+      .mockResolvedValueOnce(mockSend('ch1', 'tx1'))
 
     await store.sendText('ch1', 'rx1')
     await store.sendText('ch1', 'rx2')
     await store.sendText('ch1', 'tx1')
 
-    // sendText 总是添加 tx 方向
     expect(store.txCount).toBe(3)
+  })
+
+  it('should dedupe same packet from event and poll', () => {
+    const store = useTerminalStore()
+    store.addLine('rx', 'ch1', 'e4b8ad', '中', [0xe4, 0xb8, 0xad], '12:00:00.001', 7)
+    store.addLine('rx', 'ch1', 'e4b8ad', '中', [0xe4, 0xb8, 0xad], '12:00:00.001')
+    expect(store.lines).toHaveLength(1)
   })
 
   it('should display text based on encoding', () => {
@@ -153,7 +181,7 @@ describe('terminalStore', () => {
   it('should clear packets', async () => {
     const store = useTerminalStore()
     const { invoke } = await import('@/api/tauri')
-    vi.mocked(invoke).mockResolvedValueOnce({ success: true, bytes_sent: 1 })
+    vi.mocked(invoke).mockResolvedValueOnce(mockSend('ch1', 'data'))
     await store.sendText('ch1', 'data')
     expect(store.lines).toHaveLength(1)
 
@@ -166,14 +194,13 @@ describe('terminalStore', () => {
   it('should sendText with hex encoding', async () => {
     const store = useTerminalStore()
     const { invoke } = await import('@/api/tauri')
-    vi.mocked(invoke).mockResolvedValue({ success: true, bytes_sent: 3 })
+    vi.mocked(invoke).mockResolvedValue(mockSend('ch1', '', '010203'))
 
     await store.sendText('ch1', '010203', 'none', 'hex')
 
     expect(store.lines).toHaveLength(1)
     expect(store.lines[0].direction).toBe('tx')
     expect(store.lines[0].hex).toBe('010203')
-    // hex 模式下不调用 text 格式的 invoke
     expect(invoke).toHaveBeenCalledWith('send_data', {
       request: { channel_id: 'ch1', data: '010203', format: 'hex', suffix: 'none' },
     })
@@ -182,7 +209,7 @@ describe('terminalStore', () => {
   it('should sendText with utf-8 encoding', async () => {
     const store = useTerminalStore()
     const { invoke } = await import('@/api/tauri')
-    vi.mocked(invoke).mockResolvedValue({ success: true, bytes_sent: 5 })
+    vi.mocked(invoke).mockResolvedValue(mockSend('ch1', 'hello'))
 
     await store.sendText('ch1', 'hello', 'lf', 'utf-8')
 

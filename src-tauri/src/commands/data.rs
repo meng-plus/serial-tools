@@ -16,6 +16,10 @@ pub struct SendDataRequest {
 pub struct SendDataResponse {
     pub success: bool,
     pub bytes_sent: usize,
+    pub timestamp: String,
+    pub hex: String,
+    pub text: String,
+    pub channel_id: String,
 }
 
 #[derive(serde::Serialize)]
@@ -81,21 +85,30 @@ pub async fn send_data(
     };
 
     let len = bytes.len();
-    state.send_to_channel(&request.channel_id, &bytes).await?;
+    let channel_id = request.channel_id.clone();
+    state.send_to_channel(&channel_id, &bytes).await?;
+
+    let timestamp = chrono::Local::now().format("%H:%M:%S%.3f").to_string();
+    let hex_str = hex::encode(&bytes);
+    let text = String::from_utf8_lossy(&bytes).to_string();
 
     let entry = PacketEntry {
-        timestamp: chrono::Local::now().format("%H:%M:%S%.3f").to_string(),
+        timestamp: timestamp.clone(),
         direction: "tx".to_string(),
-        channel_id: request.channel_id,
+        channel_id: channel_id.clone(),
         bytes: bytes.clone(),
-        hex: hex::encode(&bytes),
-        text: String::from_utf8_lossy(&bytes).to_string(),
+        hex: hex_str.clone(),
+        text: text.clone(),
     };
     state.push_packet(entry).await;
 
     Ok(SendDataResponse {
         success: true,
         bytes_sent: len,
+        timestamp,
+        hex: hex_str,
+        text,
+        channel_id,
     })
 }
 
