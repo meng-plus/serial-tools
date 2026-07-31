@@ -30,11 +30,13 @@ pub fn run() {
             commands::data::send_data,
             commands::data::get_packets,
             commands::data::clear_packets,
-            // 端口转发
-            commands::forward::start_forward,
-            commands::forward::stop_forward,
-            commands::forward::list_forwarders,
-            commands::forward::delete_forwarder,
+            // 数据总线
+            commands::forward::create_bus,
+            commands::forward::subscribe_bus,
+            commands::forward::unsubscribe_bus,
+            commands::forward::list_buses,
+            commands::forward::stop_bus,
+            commands::forward::delete_bus,
             // 日志
             commands::log::get_logs,
             commands::log::clear_logs,

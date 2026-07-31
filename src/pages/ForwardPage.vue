@@ -1,88 +1,80 @@
 <template>
   <div>
-    <a-card title="端口转发" :bordered="false">
+    <a-card title="数据总线" :bordered="false">
       <a-alert
         type="info"
         show-icon
-        message="转发说明"
-        description="在两个已连接的通道之间建立数据桥接。支持：串口↔TCP、串口↔串口、TCP↔TCP。请先在「连接管理」页面建立两个连接，再创建转发规则。"
+        message="总线模式"
+        description="创建数据总线，将任意通道以不同方向接入。支持点对点转发和一对多广播。"
         style="margin-bottom: 16px"
       />
 
-      <a-button type="primary" @click="showModal = true" :disabled="connections.length < 2">
-        新建转发
-      </a-button>
+      <a-space style="margin-bottom: 16px">
+        <a-button type="primary" @click="showCreateModal = true">
+          创建总线
+        </a-button>
+        <a-button @click="refreshBuses">刷新</a-button>
+      </a-space>
 
       <a-table
-        :columns="columns"
-        :data-source="forwarders"
+        :columns="busColumns"
+        :data-source="buses"
         :pagination="false"
         size="small"
-        style="margin-top: 16px"
+        row-key="id"
+        :expand-column-width="60"
       >
+        <template #expandedRowRender="{ record }">
+          <div style="padding: 8px 0">
+            <a-space direction="vertical" style="width: 100%">
+              <div v-if="record.subscriptions.length === 0" style="color: #999">暂无订阅通道</div>
+              <div v-for="sub in record.subscriptions" :key="sub.channel_id" style="display: flex; align-items: center; gap: 8px">
+                <a-tag :color="sub.direction === 'rx_to_bus' ? 'green' : sub.direction === 'tx_from_bus' ? 'blue' : 'purple'">
+                  {{ directionLabel(sub.direction) }}
+                </a-tag>
+                <span>{{ sub.channel_id }}</span>
+                <a-button size="small" danger @click="handleUnsubscribe(record.id, sub.channel_id)">移除</a-button>
+              </div>
+            </a-space>
+            <a-divider style="margin: 8px 0" />
+            <a-space>
+              <a-select v-model:value="newSub.channelId" placeholder="选择通道" style="width: 200px" size="small">
+                <a-select-option v-for="ch in availableChannels(record)" :key="ch" :value="ch">{{ ch }}</a-select-option>
+              </a-select>
+              <a-select v-model:value="newSub.direction" style="width: 130px" size="small">
+                <a-select-option value="rx_to_bus">RX → 总线</a-select-option>
+                <a-select-option value="tx_from_bus">总线 → TX</a-select-option>
+                <a-select-option value="both">双向</a-select-option>
+              </a-select>
+              <a-button size="small" type="primary" @click="handleSubscribe(record.id)" :disabled="!newSub.channelId">添加订阅</a-button>
+            </a-space>
+          </div>
+        </template>
         <template #bodyCell="{ column, record }">
-          <template v-if="column.key === 'direction'">
-            {{ directionLabel(record.direction) }}
-          </template>
           <template v-if="column.key === 'status'">
             <a-tag :color="record.status === 'running' ? 'success' : 'default'">
               {{ record.status === 'running' ? '运行中' : '已停止' }}
             </a-tag>
           </template>
+          <template v-if="column.key === 'subs'">
+            <span>{{ record.subscriptions.length }} 通道</span>
+          </template>
           <template v-if="column.key === 'action'">
             <a-space>
-              <a-button
-                v-if="record.status === 'running'"
-                size="small"
-                danger
-                @click="handleStop(record.id)"
-              >
-                停止
-              </a-button>
-              <a-button
-                v-else
-                size="small"
-                @click="handleDelete(record.id)"
-              >
-                删除
-              </a-button>
+              <a-button v-if="record.status === 'running'" size="small" danger @click="handleStop(record.id)">停止</a-button>
+              <a-button v-else size="small" @click="handleDelete(record.id)">删除</a-button>
             </a-space>
           </template>
         </template>
       </a-table>
 
-      <a-empty v-if="forwarders.length === 0" description="暂无转发规则" />
+      <a-empty v-if="buses.length === 0" description="暂无数据总线" />
     </a-card>
 
-    <a-modal v-model:open="showModal" title="新建转发" @ok="handleCreate" :confirm-loading="creating">
+    <a-modal v-model:open="showCreateModal" title="创建总线" @ok="handleCreate" :confirm-loading="creating">
       <a-form layout="vertical">
-        <a-form-item label="名称">
-          <a-input v-model:value="newForward.name" placeholder="例: 串口转TCP" />
-        </a-form-item>
-        <a-form-item label="源通道">
-          <a-select v-model:value="newForward.sourceChannelId" placeholder="选择源通道">
-            <a-select-option v-for="c in connections" :key="c.channel_id" :value="c.channel_id">
-              {{ c.channel_id }} ({{ c.transport_type }})
-            </a-select-option>
-          </a-select>
-        </a-form-item>
-        <a-form-item label="目标通道">
-          <a-select v-model:value="newForward.targetChannelId" placeholder="选择目标通道">
-            <a-select-option
-              v-for="c in connections"
-              :key="c.channel_id"
-              :value="c.channel_id"
-              :disabled="c.channel_id === newForward.sourceChannelId"
-            >
-              {{ c.channel_id }} ({{ c.transport_type }})
-            </a-select-option>
-          </a-select>
-        </a-form-item>
-        <a-form-item label="转发方向">
-          <a-radio-group v-model:value="newForward.direction">
-            <a-radio value="bidirectional">双向 (↔)</a-radio>
-            <a-radio value="source_to_target">单向 (→)</a-radio>
-          </a-radio-group>
+        <a-form-item label="总线名称">
+          <a-input v-model:value="newBusName" placeholder="例: 串口转TCP总线" />
         </a-form-item>
       </a-form>
     </a-modal>
@@ -97,95 +89,69 @@ import { useConnectionStore } from '@/stores'
 
 const connectionStore = useConnectionStore()
 
-interface ConnectionStatus {
-  connected: boolean
+interface BusSubInfo {
   channel_id: string
-  transport_type: string
-  port_name: string
+  direction: string
 }
 
-interface ForwarderInfo {
+interface BusInfo {
   id: string
   name: string
-  source: string
-  target: string
-  direction: string
+  subscriptions: BusSubInfo[]
   status: string
   rx_bytes: number
   tx_bytes: number
 }
 
-const showModal = ref(false)
+const showCreateModal = ref(false)
 const creating = ref(false)
-const connections = ref<ConnectionStatus[]>([])
-const forwarders = ref<ForwarderInfo[]>([])
+const newBusName = ref('')
+const buses = ref<BusInfo[]>([])
 
-const columns = [
-  { title: '名称', dataIndex: 'name' },
-  { title: '源通道', dataIndex: 'source' },
-  { title: '目标通道', dataIndex: 'target' },
-  { title: '方向', key: 'direction' },
-  { title: '状态', key: 'status' },
-  { title: '操作', key: 'action' },
-]
-
-const newForward = reactive({
-  name: '',
-  sourceChannelId: '',
-  targetChannelId: '',
-  direction: 'bidirectional',
+const newSub = reactive({
+  channelId: '',
+  direction: 'rx_to_bus',
 })
+
+const busColumns = [
+  { title: '名称', dataIndex: 'name', width: 200 },
+  { title: '状态', key: 'status', width: 80 },
+  { title: '订阅', key: 'subs', width: 100 },
+  { title: '操作', key: 'action', width: 120 },
+]
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
 function directionLabel(d: string): string {
-  if (d === 'bidirectional') return '双向 ↔'
-  if (d === 'source_to_target') return '单向 →'
-  if (d === 'target_to_source') return '单向 ←'
+  if (d === 'rx_to_bus') return 'RX → 总线'
+  if (d === 'tx_from_bus') return '总线 → TX'
+  if (d === 'both') return '双向'
   return d
 }
 
-async function refreshForwarders() {
+function availableChannels(bus: BusInfo): string[] {
+  const subscribed = new Set(bus.subscriptions.map(s => s.channel_id))
+  return Array.from(connectionStore.channels.keys()).filter(id => !subscribed.has(id))
+}
+
+async function refreshBuses() {
   try {
-    forwarders.value = await invoke<ForwarderInfo[]>('list_forwarders')
+    buses.value = await invoke<BusInfo[]>('list_buses')
   } catch { /* ignore */ }
 }
 
-function syncConnections() {
-  connections.value = connectionStore.connectedChannels.map(c => ({
-    connected: c.connected,
-    channel_id: c.channelId,
-    transport_type: c.transportType,
-    port_name: c.portName,
-  }))
-}
-
 async function handleCreate() {
-  if (!newForward.sourceChannelId || !newForward.targetChannelId) {
-    message.warning('请选择源通道和目标通道')
-    return
-  }
-  if (newForward.sourceChannelId === newForward.targetChannelId) {
-    message.warning('源通道和目标通道不能相同')
+  if (!newBusName.value) {
+    message.warning('请输入总线名称')
     return
   }
   creating.value = true
   try {
-    await invoke('start_forward', {
-      request: {
-        name: newForward.name || '转发',
-        source_channel_id: newForward.sourceChannelId,
-        target_channel_id: newForward.targetChannelId,
-        direction: newForward.direction,
-      },
-    })
-    message.success('转发已启动')
-    showModal.value = false
-    newForward.name = ''
-    newForward.sourceChannelId = ''
-    newForward.targetChannelId = ''
-    newForward.direction = 'bidirectional'
-    await refreshForwarders()
+    await invoke('create_bus', { request: { name: newBusName.value } })
+    message.success('总线已创建')
+    showCreateModal.value = false
+    newBusName.value = ''
+    await refreshBuses()
   } catch (e: any) {
     message.error(String(e))
   } finally {
@@ -193,33 +159,61 @@ async function handleCreate() {
   }
 }
 
-async function handleStop(id: string) {
+async function handleSubscribe(busId: string) {
+  if (!newSub.channelId) {
+    message.warning('请选择通道')
+    return
+  }
   try {
-    await invoke('stop_forward', { forwarderId: id })
-    message.success('转发已停止')
-    await refreshForwarders()
+    await invoke('subscribe_bus', {
+      request: {
+        bus_id: busId,
+        channel_id: newSub.channelId,
+        direction: newSub.direction,
+      },
+    })
+    message.success('订阅成功')
+    newSub.channelId = ''
+    newSub.direction = 'rx_to_bus'
+    await refreshBuses()
   } catch (e: any) {
     message.error(String(e))
   }
 }
 
-async function handleDelete(id: string) {
+async function handleUnsubscribe(busId: string, channelId: string) {
   try {
-    await invoke('delete_forwarder', { forwarderId: id })
-    message.success('已删除')
-    await refreshForwarders()
+    await invoke('unsubscribe_bus', { busId, channelId })
+    message.success('已取消订阅')
+    await refreshBuses()
+  } catch (e: any) {
+    message.error(String(e))
+  }
+}
+
+async function handleStop(busId: string) {
+  try {
+    await invoke('stop_bus', { busId })
+    message.success('总线已停止')
+    await refreshBuses()
+  } catch (e: any) {
+    message.error(String(e))
+  }
+}
+
+async function handleDelete(busId: string) {
+  try {
+    await invoke('delete_bus', { busId })
+    message.success('总线已删除')
+    await refreshBuses()
   } catch (e: any) {
     message.error(String(e))
   }
 }
 
 onMounted(async () => {
-  syncConnections()
-  await refreshForwarders()
-  pollTimer = setInterval(() => {
-    syncConnections()
-    refreshForwarders()
-  }, 10000)
+  await refreshBuses()
+  pollTimer = setInterval(refreshBuses, 5000)
 })
 
 onUnmounted(() => {

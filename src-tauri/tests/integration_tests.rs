@@ -765,3 +765,82 @@ async fn test_tcp_server_take_new_clients_preserves_existing() {
 }
 
 use std::net::TcpStream;
+
+// ══════════════════════════════════════════════════════════════
+// L7: 数据总线测试
+// ══════════════════════════════════════════════════════════════
+
+use serial_tools_lib::state::{BusDirection, DataBus};
+
+#[tokio::test]
+async fn test_bus_create_and_list() {
+    use transport::mock::MockTransport;
+    use transport::Transport;
+
+    let state = serial_tools_lib::state::AppState::default();
+    let (bus_tx, _) = tokio::sync::broadcast::channel(1024);
+
+    let bus = DataBus {
+        id: "bus-1".to_string(),
+        name: "test-bus".to_string(),
+        subscriptions: Vec::new(),
+        bus_tx,
+        cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        threads: Vec::new(),
+        rx_bytes: 0,
+        tx_bytes: 0,
+    };
+
+    state.buses.write().await.insert("bus-1".to_string(), bus);
+    let buses = state.buses.read().await;
+    assert_eq!(buses.len(), 1);
+    assert_eq!(buses.get("bus-1").unwrap().name, "test-bus");
+}
+
+#[tokio::test]
+async fn test_bus_mock_forward() {
+    use transport::mock::MockTransport;
+    use transport::Transport;
+
+    // 创建两个 mock transport
+    let mut mock_a = MockTransport::new("serial", "COM_A");
+    mock_a.open().unwrap();
+    let mut mock_b = MockTransport::new("serial", "COM_B");
+    mock_b.open().unwrap();
+
+    // 模拟总线转发：A.RX → bus → B.TX
+    mock_a.enqueue_rx(b"hello from A".to_vec());
+
+    // 模拟总线内部转发
+    let (bus_tx, mut bus_rx) = tokio::sync::broadcast::channel::<Vec<u8>>(1024);
+
+    // A 读线程：读 A.RX → 推入 bus
+    let a_transport = Arc::new(mock_a);
+    let b_transport = Arc::new(mock_b);
+    let a_ref = a_transport.clone();
+    let b_ref = b_transport.clone();
+    let bus_tx2 = bus_tx.clone();
+
+    // 读 A
+    let mut buf = [0u8; 4096];
+    let n = a_ref.read(&mut buf).unwrap();
+    assert!(n > 0);
+    bus_tx2.send(buf[..n].to_vec()).unwrap();
+
+    // 从 bus 读 → 写 B
+    let data = bus_rx.try_recv().unwrap();
+    b_ref.write(&data).unwrap();
+
+    // 验证 B 收到
+    let tx_log = b_ref.get_tx_log();
+    assert_eq!(tx_log.len(), 1);
+    assert_eq!(tx_log[0], b"hello from A");
+}
+
+#[tokio::test]
+async fn test_bus_direction_enum() {
+    // 验证方向枚举的正确性
+    assert_ne!(BusDirection::RxToBus, BusDirection::TxFromBus);
+    assert_ne!(BusDirection::Both, BusDirection::RxToBus);
+    assert_eq!(BusDirection::Both, BusDirection::Both);
+}

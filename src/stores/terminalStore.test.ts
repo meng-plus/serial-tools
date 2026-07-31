@@ -139,4 +139,74 @@ describe('terminalStore', () => {
 
     expect(store.lines).toEqual([])
   })
+
+  it('should sendText with hex encoding', async () => {
+    const store = useTerminalStore()
+    const { invoke } = await import('@/api/tauri')
+    vi.mocked(invoke).mockResolvedValue({ success: true, bytes_sent: 3 })
+
+    await store.sendText('ch1', '010203', 'none', 'hex')
+
+    expect(store.lines).toHaveLength(1)
+    expect(store.lines[0].direction).toBe('tx')
+    expect(store.lines[0].hex).toBe('010203')
+    // hex 模式下不调用 text 格式的 invoke
+    expect(invoke).toHaveBeenCalledWith('send_data', {
+      request: { channel_id: 'ch1', data: '010203', format: 'hex', suffix: 'none' },
+    })
+  })
+
+  it('should sendText with utf-8 encoding', async () => {
+    const store = useTerminalStore()
+    const { invoke } = await import('@/api/tauri')
+    vi.mocked(invoke).mockResolvedValue({ success: true, bytes_sent: 5 })
+
+    await store.sendText('ch1', 'hello', 'lf', 'utf-8')
+
+    expect(store.lines).toHaveLength(1)
+    expect(store.lines[0].text).toBe('hello')
+    expect(invoke).toHaveBeenCalledWith('send_data', {
+      request: { channel_id: 'ch1', data: 'hello', format: 'text', suffix: 'lf' },
+    })
+  })
+
+  it('should filter rx data by channel', () => {
+    const store = useTerminalStore()
+
+    // 模拟 RX 数据到达
+    store['addLine']('rx', 'ch1', '48656c6c6f', 'Hello', [72, 101, 108, 108, 111])
+    store['addLine']('rx', 'ch2', '576f726c64', 'World', [87, 111, 114, 108, 100])
+    store['addLine']('tx', 'ch1', '', 'tx-data', [])
+
+    store.activeChannelId = 'ch1'
+    expect(store.filteredLines).toHaveLength(2)
+    expect(store.rxCount).toBe(1)
+    expect(store.txCount).toBe(1)
+
+    store.activeChannelId = ''
+    expect(store.filteredLines).toHaveLength(3)
+    expect(store.rxCount).toBe(2)
+    expect(store.txCount).toBe(1)
+  })
+
+  it('should convert hex string to bytes', () => {
+    const store = useTerminalStore()
+    // 测试 hexToBytes 通过 displayText 的 hex 模式
+    const line = {
+      id: 1,
+      timestamp: '12:00:00.000',
+      direction: 'rx' as const,
+      channelId: 'ch1',
+      hex: 'deadbeef',
+      text: '',
+      rawBytes: [0xde, 0xad, 0xbe, 0xef],
+    }
+
+    store.encoding = 'hex'
+    expect(store.displayText(line)).toBe('de ad be ef')
+
+    store.encoding = 'utf-8'
+    // rawBytes 不是有效 UTF-8，但 text 为空所以返回空
+    expect(store.displayText(line)).toBe('')
+  })
 })

@@ -5,19 +5,16 @@
         <a-select v-model:value="terminalStore.activeChannelId" style="width: 280px" placeholder="全部通道" allowClear>
           <a-select-option value="">全部通道</a-select-option>
           <template v-for="ch in allChannels" :key="ch.channelId">
-            <!-- TCP Server：显示服务端本身 -->
             <template v-if="ch.transportType === 'tcp_server'">
               <a-select-option :value="ch.channelId">
                 🖧 {{ ch.channelId }} ({{ ch.clients?.length || 0 }} 客户端)
               </a-select-option>
             </template>
-            <!-- TCP Server 客户端子通道：缩进显示 -->
             <template v-else-if="ch.transportType === 'tcp_server_client'">
               <a-select-option :value="ch.channelId">
                 &nbsp;&nbsp;└ {{ ch.portName }} (客户端)
               </a-select-option>
             </template>
-            <!-- 其他通道 -->
             <template v-else>
               <a-select-option :value="ch.channelId">
                 {{ ch.channelId }}
@@ -26,11 +23,7 @@
           </template>
         </a-select>
 
-        <a-segmented v-model:value="terminalStore.encoding" :options="[
-          { label: 'UTF-8', value: 'utf-8' },
-          { label: 'GBK', value: 'gbk' },
-          { label: 'HEX', value: 'hex' },
-        ]" size="small" />
+        <a-segmented v-model:value="terminalStore.encoding" :options="encodingOptions" size="small" />
 
         <a-divider type="vertical" />
 
@@ -82,12 +75,18 @@
     </div>
 
     <div class="send-area">
+      <div class="send-header">
+        <a-space>
+          <span style="font-size: 12px; color: #666">发送编码:</span>
+          <a-segmented v-model:value="sendEncoding" :options="encodingOptions" size="small" />
+        </a-space>
+      </div>
       <a-tabs v-model:activeKey="sendMode" size="small">
         <a-tab-pane key="text" tab="文本">
           <div class="send-col">
             <a-textarea
               v-model:value="sendText"
-              :placeholder="selectedChannel ? '输入文本... (Ctrl+Enter 发送)' : '请先选择通道'"
+              :placeholder="selectedChannel ? sendPlaceholder : '请先选择通道'"
               :disabled="!selectedChannel"
               :auto-size="{ minRows: 2, maxRows: 6 }"
               @keydown="handleTextKeydown"
@@ -132,6 +131,7 @@ import { useRoute } from 'vue-router'
 import { VerticalAlignBottomOutlined, SettingOutlined } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 import { useConnectionStore, useTerminalStore } from '@/stores'
+import type { Encoding } from '@/stores/terminalStore'
 
 const route = useRoute()
 const connectionStore = useConnectionStore()
@@ -142,15 +142,24 @@ const sendMode = ref('text')
 const sendText = ref('')
 const sendHex = ref('')
 const sendSuffix = ref('none')
+const sendEncoding = ref<Encoding>('utf-8')
 const autoScroll = ref(true)
 
-// 所有通道（按类型排序：先显示 TCP Server，紧跟其客户端，再显示其他）
-const allChannels = computed(() => {
-  const list = Array.from(connectionStore.channels.values())
-  // 已在 connectionStore.refreshStatus 中按插入顺序排列，无需额外排序
-  return list
+const encodingOptions = [
+  { label: 'UTF-8', value: 'utf-8' as const },
+  { label: 'GBK', value: 'gbk' as const },
+  { label: 'HEX', value: 'hex' as const },
+]
+
+const sendPlaceholder = computed(() => {
+  switch (sendEncoding.value) {
+    case 'gbk': return '输入 GBK 文本... (Ctrl+Enter 发送)'
+    case 'hex': return '输入 HEX 数据... (Ctrl+Enter 发送)'
+    default: return '输入文本... (Ctrl+Enter 发送)'
+  }
 })
 
+const allChannels = computed(() => Array.from(connectionStore.channels.values()))
 const connectedChannels = computed(() => connectionStore.connectedChannels)
 
 const selectedChannel = computed(() => {
@@ -182,8 +191,7 @@ watch(
 async function handleSendText() {
   if (!selectedChannel.value || !sendText.value) return
   try {
-    await terminalStore.sendText(selectedChannel.value, sendText.value, sendSuffix.value)
-    // 不清空发送框，方便重复发送
+    await terminalStore.sendText(selectedChannel.value, sendText.value, sendSuffix.value, sendEncoding.value)
   } catch (e: any) {
     message.error(String(e))
   }
@@ -193,7 +201,6 @@ async function handleSendHex() {
   if (!selectedChannel.value || !sendHex.value) return
   try {
     await terminalStore.sendHex(selectedChannel.value, sendHex.value)
-    // 不清空发送框
   } catch (e: any) {
     message.error(String(e))
   }
@@ -255,6 +262,9 @@ function handleHexKeydown(e: KeyboardEvent) {
   border-top: 1px solid #f0f0f0;
   padding-top: 8px;
 }
+.send-header {
+  margin-bottom: 8px;
+}
 .send-col {
   display: flex;
   flex-direction: column;
@@ -264,9 +274,5 @@ function handleHexKeydown(e: KeyboardEvent) {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
-}
-.send-row {
-  display: flex;
-  gap: 8px;
 }
 </style>

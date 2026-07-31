@@ -33,7 +33,7 @@ impl TcpClientTransport {
     pub fn from_stream(stream: TcpStream, addr: SocketAddr) -> Self {
         let addr_str = addr.to_string();
         let descriptor = TransportDescriptor {
-            kind: "tcp_client".to_string(),
+            kind: "tcp_server_client".to_string(),
             address: addr_str,
             ..Default::default()
         };
@@ -361,7 +361,7 @@ mod tests {
             let (stream, addr) = listener.accept().unwrap();
             let client = TcpClientTransport::from_stream(stream, addr);
             assert!(client.is_active());
-            assert_eq!(client.descriptor().kind, "tcp_client");
+            assert_eq!(client.descriptor().kind, "tcp_server_client");
             // descriptor 地址是客户端地址（IP:端口），不是服务端端口
             assert!(client.descriptor().address.starts_with("127.0.0.1:"));
         });

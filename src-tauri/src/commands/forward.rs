@@ -1,281 +1,309 @@
-//! 端口转发命令 — 串口↔TCP 桥接转发
+//! 数据总线命令 — 多通道共享数据管道
+//!
+//! 总线模型：
+//!   - create_bus: 创建命名总线
+//!   - subscribe_bus: 将通道订阅到总线（可选方向）
+//!   - unsubscribe_bus: 取消订阅
+//!   - list_buses: 列出所有总线
+//!   - stop_bus / delete_bus: 停止/删除总线
+//!
+//! 点对点转发 = 2 个通道订阅同一总线（A:RxToBus, B:TxFromBus）
+//! 广播 = 1 个 RxToBus + N 个 TxFromBus
 
-use crate::state::{AppState, ForwarderInfo, ForwarderStatus};
+use crate::state::{AppState, BusDirection, BusInfo, BusSubInfo, DataBus};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::State;
 
 #[derive(serde::Deserialize)]
-pub struct StartForwardRequest {
+pub struct CreateBusRequest {
     pub name: String,
-    pub source_channel_id: String,
-    pub target_channel_id: String,
-    pub direction: Option<String>, // bidirectional / source_to_target / target_to_source
+}
+
+#[derive(serde::Deserialize)]
+pub struct SubscribeBusRequest {
+    pub bus_id: String,
+    pub channel_id: String,
+    pub direction: String, // "rx_to_bus" / "tx_from_bus" / "both"
 }
 
 #[derive(serde::Serialize)]
-pub struct ForwardResponse {
+pub struct BusResponse {
     pub success: bool,
-    pub forwarder_id: String,
+    pub bus_id: String,
     pub message: String,
 }
 
-#[derive(serde::Serialize)]
-pub struct ForwarderInfoResponse {
-    pub id: String,
-    pub name: String,
-    pub source: String,
-    pub target: String,
-    pub direction: String,
-    pub status: String,
-    pub rx_bytes: u64,
-    pub tx_bytes: u64,
-}
-
-/// 启动转发 — 在两个已连接的 channel 之间建立数据桥接
-///
-/// 原理:
-///   source 通道的 RX 数据 → 直接写入 target 通道
-///   target 通道的 RX 数据 → 直接写入 source 通道（双向模式）
-///
-/// 使用 std::thread::spawn + Arc<dyn Transport> 进行同步读写，
-/// 因为底层 Transport trait 是同步的。
+/// 创建数据总线
 #[tauri::command]
-pub async fn start_forward(
-    request: StartForwardRequest,
+pub async fn create_bus(
+    request: CreateBusRequest,
     state: State<'_, AppState>,
-) -> Result<ForwardResponse, String> {
-    // 验证两个通道都存在且活跃
-    {
-        let channels = state.channels.read().await;
-        let src = channels
-            .get(&request.source_channel_id)
-            .ok_or_else(|| format!("源通道 {} 不存在", request.source_channel_id))?;
-        if !src.is_active() {
-            return Err(format!("源通道 {} 未连接", request.source_channel_id));
-        }
-        let tgt = channels
-            .get(&request.target_channel_id)
-            .ok_or_else(|| format!("目标通道 {} 不存在", request.target_channel_id))?;
-        if !tgt.is_active() {
-            return Err(format!("目标通道 {} 未连接", request.target_channel_id));
-        }
-    }
+) -> Result<BusResponse, String> {
+    let bus_id = uuid::Uuid::new_v4().to_string();
+    let (bus_tx, _) = tokio::sync::broadcast::channel(1024);
 
-    let direction = request.direction.unwrap_or_else(|| "bidirectional".to_string());
-
-    // 如果是双向，检查两个通道不是同一个
-    if direction == "bidirectional" && request.source_channel_id == request.target_channel_id {
-        return Err("双向转发不能使用同一个通道".to_string());
-    }
-
-    let forwarder_id = uuid::Uuid::new_v4().to_string();
-    let cancel = Arc::new(AtomicBool::new(false));
-    let mut threads = Vec::new();
-
-    // ── source → target 线程 ──────────────────────────────────
-    if direction == "bidirectional" || direction == "source_to_target" {
-        let src_transport = {
-            let channels = state.channels.read().await;
-            channels.get(&request.source_channel_id).unwrap().clone()
-        };
-        let tgt_transport = {
-            let channels = state.channels.read().await;
-            channels.get(&request.target_channel_id).unwrap().clone()
-        };
-        let cancel_clone = cancel.clone();
-        let fwd_id = forwarder_id.clone();
-        let src_id = request.source_channel_id.clone();
-        let tgt_id = request.target_channel_id.clone();
-        let _packets = state.packets.clone();
-
-        let handle = std::thread::spawn(move || {
-            let mut buf = [0u8; 4096];
-            loop {
-                if cancel_clone.load(Ordering::Relaxed) {
-                    break;
-                }
-                match src_transport.read(&mut buf) {
-                    Ok(0) => {
-                        // TCP 返回 0 = 对端关闭
-                        let desc = src_transport.descriptor();
-                        if desc.kind.starts_with("tcp") {
-                            break;
-                        }
-                        std::thread::sleep(std::time::Duration::from_millis(5));
-                    }
-                    Ok(n) => {
-                        let data = &buf[..n];
-                        // 写入目标
-                        if let Err(e) = tgt_transport.write(data) {
-                            eprintln!("[fwd {}] 写入 {} 失败: {}", fwd_id, tgt_id, e);
-                            // 写失败可能意味着目标断了
-                            if tgt_transport.descriptor().kind.starts_with("tcp") {
-                                break;
-                            }
-                        }
-                    }
-                    Err(_) => {
-                        std::thread::sleep(std::time::Duration::from_millis(10));
-                    }
-                }
-            }
-            eprintln!("[fwd {}] {}→{} 读线程退出", fwd_id, src_id, tgt_id);
-        });
-        threads.push(handle);
-    }
-
-    // ── target → source 线程（双向） ──────────────────────────
-    if direction == "bidirectional" || direction == "target_to_source" {
-        let src_transport = {
-            let channels = state.channels.read().await;
-            channels.get(&request.source_channel_id).unwrap().clone()
-        };
-        let tgt_transport = {
-            let channels = state.channels.read().await;
-            channels.get(&request.target_channel_id).unwrap().clone()
-        };
-        let cancel_clone = cancel.clone();
-        let fwd_id = forwarder_id.clone();
-        let src_id = request.source_channel_id.clone();
-        let tgt_id = request.target_channel_id.clone();
-
-        let handle = std::thread::spawn(move || {
-            let mut buf = [0u8; 4096];
-            loop {
-                if cancel_clone.load(Ordering::Relaxed) {
-                    break;
-                }
-                match tgt_transport.read(&mut buf) {
-                    Ok(0) => {
-                        let desc = tgt_transport.descriptor();
-                        if desc.kind.starts_with("tcp") {
-                            break;
-                        }
-                        std::thread::sleep(std::time::Duration::from_millis(5));
-                    }
-                    Ok(n) => {
-                        let data = &buf[..n];
-                        if let Err(e) = src_transport.write(data) {
-                            eprintln!("[fwd {}] 写入 {} 失败: {}", fwd_id, src_id, e);
-                            if src_transport.descriptor().kind.starts_with("tcp") {
-                                break;
-                            }
-                        }
-                    }
-                    Err(_) => {
-                        std::thread::sleep(std::time::Duration::from_millis(10));
-                    }
-                }
-            }
-            eprintln!("[fwd {}] {}→{} 读线程退出", fwd_id, tgt_id, src_id);
-        });
-        threads.push(handle);
-    }
-
-    let info = ForwarderInfo {
-        id: forwarder_id.clone(),
+    let bus = DataBus {
+        id: bus_id.clone(),
         name: request.name.clone(),
-        source_channel_id: request.source_channel_id.clone(),
-        target_channel_id: request.target_channel_id.clone(),
-        direction: direction.clone(),
-        status: ForwarderStatus::Running,
+        subscriptions: Vec::new(),
+        bus_tx,
+        cancel: Arc::new(AtomicBool::new(false)),
+        threads: Vec::new(),
         rx_bytes: 0,
         tx_bytes: 0,
     };
 
-    let handle = crate::state::ForwarderHandle {
-        info,
-        cancel,
-        threads,
-    };
-
-    state.forwarders.write().await.insert(forwarder_id.clone(), handle);
+    state.buses.write().await.insert(bus_id.clone(), bus);
     state
-        .log("info", "forward", &format!("转发 [{}] {} ↔ {} 已启动 ({})", request.name, request.source_channel_id, request.target_channel_id, direction))
+        .log("info", "bus", &format!("总线 [{}] 已创建", request.name))
         .await;
 
-    Ok(ForwardResponse {
+    Ok(BusResponse {
         success: true,
-        forwarder_id,
-        message: format!("转发已启动: {} ↔ {}", request.source_channel_id, request.target_channel_id),
+        bus_id,
+        message: format!("总线 [{}] 已创建", request.name),
     })
 }
 
-/// 停止转发
+/// 订阅通道到总线
 #[tauri::command]
-pub async fn stop_forward(
-    forwarder_id: String,
+pub async fn subscribe_bus(
+    request: SubscribeBusRequest,
     state: State<'_, AppState>,
-) -> Result<ForwardResponse, String> {
-    let mut forwarders = state.forwarders.write().await;
-    let handle = forwarders
-        .get_mut(&forwarder_id)
-        .ok_or_else(|| format!("转发器 {} 不存在", forwarder_id))?;
-
-    // 发送取消信号
-    handle.cancel.store(true, Ordering::Relaxed);
-
-    // 等待所有线程退出
-    for thread in handle.threads.drain(..) {
-        let _ = thread.join();
+) -> Result<BusResponse, String> {
+    // 验证通道存在
+    {
+        let channels = state.channels.read().await;
+        if !channels.contains_key(&request.channel_id) {
+            return Err(format!("通道 {} 不存在", request.channel_id));
+        }
     }
 
-    handle.info.status = ForwarderStatus::Stopped;
+    let direction = match request.direction.as_str() {
+        "rx_to_bus" => BusDirection::RxToBus,
+        "tx_from_bus" => BusDirection::TxFromBus,
+        "both" => BusDirection::Both,
+        _ => return Err(format!("不支持的方向: {}", request.direction)),
+    };
+
+    let mut buses = state.buses.write().await;
+    let bus = buses
+        .get_mut(&request.bus_id)
+        .ok_or_else(|| format!("总线 {} 不存在", request.bus_id))?;
+
+    // 检查是否已订阅
+    if bus.subscriptions.iter().any(|s| s.channel_id == request.channel_id) {
+        return Err(format!("通道 {} 已订阅此总线", request.channel_id));
+    }
+
+    // 获取通道 transport
+    let channels = state.channels.read().await;
+    let transport = channels
+        .get(&request.channel_id)
+        .ok_or_else(|| format!("通道 {} 不存在", request.channel_id))?
+        .clone();
+    drop(channels);
+
+    let channel_id = request.channel_id.clone();
+    let bus_tx = bus.bus_tx.clone();
+    let cancel = bus.cancel.clone();
+
+    // RxToBus / Both: 启动读线程，将通道 RX 推送到总线
+    if direction == BusDirection::RxToBus || direction == BusDirection::Both {
+        let transport_clone = transport.clone();
+        let bus_tx_clone = bus_tx.clone();
+        let cancel_clone = cancel.clone();
+        let cid = channel_id.clone();
+
+        let handle = std::thread::spawn(move || {
+            let mut buf = [0u8; 4096];
+            loop {
+                if cancel_clone.load(Ordering::Relaxed) {
+                    break;
+                }
+                match transport_clone.read(&mut buf) {
+                    Ok(0) => {
+                        let desc = transport_clone.descriptor();
+                        if desc.kind.starts_with("tcp") {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                    Ok(n) => {
+                        let data = buf[..n].to_vec();
+                        let _ = bus_tx_clone.send(data);
+                    }
+                    Err(_) => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                }
+            }
+            eprintln!("[bus] {} RxToBus 线程退出", cid);
+        });
+        bus.threads.push(handle);
+    }
+
+    // TxFromBus / Both: 订阅总线广播，写入通道 TX
+    if direction == BusDirection::TxFromBus || direction == BusDirection::Both {
+        let transport_clone = transport.clone();
+        let mut bus_rx = bus.bus_tx.subscribe();
+        let cancel_clone = cancel.clone();
+        let cid = channel_id.clone();
+
+        let handle = std::thread::spawn(move || {
+            loop {
+                if cancel_clone.load(Ordering::Relaxed) {
+                    break;
+                }
+                match bus_rx.try_recv() {
+                    Ok(data) => {
+                        if let Err(e) = transport_clone.write(&data) {
+                            eprintln!("[bus] 写入 {} 失败: {}", cid, e);
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::TryRecvError::Empty) => {
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                    Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {
+                        // 跳过滞后的数据
+                    }
+                    Err(tokio::sync::broadcast::error::TryRecvError::Closed) => {
+                        break;
+                    }
+                }
+            }
+            eprintln!("[bus] {} TxFromBus 线程退出", cid);
+        });
+        bus.threads.push(handle);
+    }
+
+    bus.subscriptions.push(crate::state::BusSubscription {
+        channel_id: channel_id.clone(),
+        direction: direction.clone(),
+    });
+
+    let dir_str = match direction {
+        BusDirection::RxToBus => "rx_to_bus",
+        BusDirection::TxFromBus => "tx_from_bus",
+        BusDirection::Both => "both",
+    };
 
     state
-        .log("info", "forward", &format!("转发 [{}] 已停止", handle.info.name))
+        .log("info", "bus", &format!("通道 {} 订阅总线 [{}] ({})", channel_id, bus.name, dir_str))
         .await;
 
-    Ok(ForwardResponse {
+    Ok(BusResponse {
         success: true,
-        forwarder_id,
-        message: "转发已停止".to_string(),
+        bus_id: request.bus_id,
+        message: format!("通道 {} 已订阅", channel_id),
     })
 }
 
-/// 列出所有转发器
+/// 取消订阅
 #[tauri::command]
-pub async fn list_forwarders(
+pub async fn unsubscribe_bus(
+    bus_id: String,
+    channel_id: String,
     state: State<'_, AppState>,
-) -> Result<Vec<ForwarderInfoResponse>, String> {
-    let forwarders = state.forwarders.read().await;
-    Ok(forwarders
+) -> Result<BusResponse, String> {
+    let mut buses = state.buses.write().await;
+    let bus = buses
+        .get_mut(&bus_id)
+        .ok_or_else(|| format!("总线 {} 不存在", bus_id))?;
+
+    bus.subscriptions.retain(|s| s.channel_id != channel_id);
+
+    state
+        .log("info", "bus", &format!("通道 {} 取消订阅总线 [{}]", channel_id, bus.name))
+        .await;
+
+    Ok(BusResponse {
+        success: true,
+        bus_id,
+        message: format!("通道 {} 已取消订阅", channel_id),
+    })
+}
+
+/// 列出所有总线
+#[tauri::command]
+pub async fn list_buses(
+    state: State<'_, AppState>,
+) -> Result<Vec<BusInfo>, String> {
+    let buses = state.buses.read().await;
+    Ok(buses
         .values()
-        .map(|h| ForwarderInfoResponse {
-            id: h.info.id.clone(),
-            name: h.info.name.clone(),
-            source: h.info.source_channel_id.clone(),
-            target: h.info.target_channel_id.clone(),
-            direction: h.info.direction.clone(),
-            status: match h.info.status {
-                ForwarderStatus::Running => "running".to_string(),
-                ForwarderStatus::Stopped => "stopped".to_string(),
+        .map(|b| BusInfo {
+            id: b.id.clone(),
+            name: b.name.clone(),
+            subscriptions: b
+                .subscriptions
+                .iter()
+                .map(|s| BusSubInfo {
+                    channel_id: s.channel_id.clone(),
+                    direction: match s.direction {
+                        BusDirection::RxToBus => "rx_to_bus".to_string(),
+                        BusDirection::TxFromBus => "tx_from_bus".to_string(),
+                        BusDirection::Both => "both".to_string(),
+                    },
+                })
+                .collect(),
+            status: if b.cancel.load(Ordering::Relaxed) {
+                "stopped".to_string()
+            } else {
+                "running".to_string()
             },
-            rx_bytes: h.info.rx_bytes,
-            tx_bytes: h.info.tx_bytes,
+            rx_bytes: b.rx_bytes,
+            tx_bytes: b.tx_bytes,
         })
         .collect())
 }
 
-/// 删除转发器（必须先停止）
+/// 停止总线
 #[tauri::command]
-pub async fn delete_forwarder(
-    forwarder_id: String,
+pub async fn stop_bus(
+    bus_id: String,
     state: State<'_, AppState>,
-) -> Result<bool, String> {
-    let mut forwarders = state.forwarders.write().await;
-    let handle = forwarders
-        .get(&forwarder_id)
-        .ok_or_else(|| format!("转发器 {} 不存在", forwarder_id))?;
+) -> Result<BusResponse, String> {
+    let mut buses = state.buses.write().await;
+    let bus = buses
+        .get_mut(&bus_id)
+        .ok_or_else(|| format!("总线 {} 不存在", bus_id))?;
 
-    if handle.info.status == ForwarderStatus::Running {
-        return Err("请先停止转发再删除".to_string());
+    bus.cancel.store(true, Ordering::Relaxed);
+    for thread in bus.threads.drain(..) {
+        let _ = thread.join();
     }
 
-    forwarders.remove(&forwarder_id);
     state
-        .log("info", "forward", &format!("转发器 {} 已删除", forwarder_id))
+        .log("info", "bus", &format!("总线 [{}] 已停止", bus.name))
+        .await;
+
+    Ok(BusResponse {
+        success: true,
+        bus_id,
+        message: "总线已停止".to_string(),
+    })
+}
+
+/// 删除总线（必须先停止）
+#[tauri::command]
+pub async fn delete_bus(
+    bus_id: String,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    let mut buses = state.buses.write().await;
+    let bus = buses
+        .get(&bus_id)
+        .ok_or_else(|| format!("总线 {} 不存在", bus_id))?;
+
+    if !bus.cancel.load(Ordering::Relaxed) {
+        return Err("请先停止总线再删除".to_string());
+    }
+
+    let bus = buses.remove(&bus_id).unwrap();
+    state
+        .log("info", "bus", &format!("总线 [{}] 已删除", bus.name))
         .await;
     Ok(true)
 }

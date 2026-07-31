@@ -8,7 +8,8 @@
 | L2 | 模块测试 | cargo test | `crates/transport/src/tcp.rs` | 16 |
 | L3 | 功能测试 | cargo test | `src-tauri/tests/integration_tests.rs` | 28 |
 | L4 | 前端测试 | vitest | `src/**/*.test.ts` | 27 |
-| **合计** | | | | **114** |
+| L5 | 数据总线测试 | cargo test | `src-tauri/tests/integration_tests.rs` | 3 |
+| **合计** | | | | **117** |
 
 ## 运行命令
 
@@ -165,3 +166,11 @@ npm run test:watch
 |------|--------|
 | isTauri 无 window | 返回 false |
 | invoke 非 Tauri 环境 | 抛出错误 |
+
+## L5: 数据总线测试
+
+| 测试 | 验证点 |
+|------|--------|
+| test_bus_create_and_list | 创建总线、验证列表 |
+| test_bus_mock_forward | Mock A.RX → bus → B.TX 转发验证 |
+| test_bus_direction_enum | BusDirection 枚举正确性 |

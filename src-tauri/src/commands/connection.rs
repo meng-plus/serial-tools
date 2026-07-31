@@ -148,6 +148,10 @@ pub async fn connect(
             std::thread::spawn(move || {
                 loop {
                     std::thread::sleep(std::time::Duration::from_millis(100));
+                    // 如果 server 已关闭，退出监控线程
+                    if !monitor_server.is_active() {
+                        break;
+                    }
                     let new_clients = monitor_server.take_new_clients();
                     for (addr, stream) in new_clients {
                         let client_id = format!("tcp_client-{}", addr);
