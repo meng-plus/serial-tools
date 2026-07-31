@@ -36,7 +36,18 @@ export interface TxListTemplate {
   frameProfileId?: string
 }
 
-export type ChecksumAlgo = 'none' | 'sum8' | 'crc16_modbus'
+export type ChecksumAlgo =
+  | 'none'
+  | 'sum8'
+  | 'sum16_le'
+  | 'sum16_be'
+  | 'xor8'
+  | 'crc8_07'
+  | 'crc8_31'
+  | 'crc16_modbus'
+  | 'crc16_ccitt_false'
+  | 'crc16_ibm'
+
 
 export interface FrameProfile {
   id: string

@@ -1,6 +1,23 @@
 /** 协议 / 多视图共享类型 */
 
-export type RuleType = 'regex' | 'json'
+import type { BinaryFrameConfig } from './binaryFramer'
+import type { ChecksumAlgo } from './checksum'
+
+export type RuleType = 'regex' | 'json' | 'binary'
+
+export type BinaryNumberType =
+  | 'u8'
+  | 'i8'
+  | 'u16le'
+  | 'u16be'
+  | 'i16le'
+  | 'i16be'
+  | 'u32le'
+  | 'u32be'
+  | 'i32le'
+  | 'i32be'
+  | 'f32le'
+  | 'f32be'
 
 export interface FieldExtract {
   name: string
@@ -9,6 +26,17 @@ export interface FieldExtract {
   /** JSONPath 简化：如 $.temp 或 temp（根级键） */
   path?: string
   as?: 'string' | 'number'
+  unit?: string
+  valueId?: string
+}
+
+/** 二进制字段：offset + 类型 + 线性变换 */
+export interface BinaryFieldDef {
+  name: string
+  offset: number
+  type: BinaryNumberType
+  scale?: number
+  bias?: number
   unit?: string
   valueId?: string
 }
@@ -23,8 +51,13 @@ export interface ProtocolRule {
    * 保留字段仅为兼容旧会话；匹配时忽略。
    */
   channelId?: string
+  /** regex/json 用；binary 时可放 syncHeader 便于展示 */
   pattern: string
   fields: FieldExtract[]
+  /** binary 规则分帧配置 */
+  frame?: BinaryFrameConfig
+  /** binary 字段表 */
+  binaryFields?: BinaryFieldDef[]
 }
 
 export interface ParsedField {
@@ -74,3 +107,5 @@ export interface ViewInstance {
   title?: string
   config: Record<string, unknown>
 }
+
+export type { ChecksumAlgo, BinaryFrameConfig }

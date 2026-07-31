@@ -210,6 +210,7 @@ BusSubscription { channel_id, direction: RxToBus | TxFromBus | Both }
 **理由**:
 - 与现有 `rx-data` 扇出模型一致，多视图可并行订阅且不抢读
 - 字符串协议与图表（vue-echarts）天然在前端闭环
-- 避免过早建设后端 ProtocolChannel；二进制协议需要时再迁
+- 避免过早建设后端 ProtocolChannel；二进制协议优先前端分帧+字段表（见 DESIGN_binary-protocol）
+- **不做**完整 Modbus 主站/从站产品化
 
 **详情**: [protocol-multi-view/DESIGN_protocol-multi-view.md](./protocol-multi-view/DESIGN_protocol-multi-view.md)

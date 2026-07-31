@@ -42,6 +42,9 @@ const cards = computed(() => {
     for (const f of r.fields) {
       if (f.as === 'number') fromRules.add(f.valueId || f.name)
     }
+    for (const f of r.binaryFields || []) {
+      fromRules.add(f.valueId || f.name)
+    }
   }
   for (const id of valueBus.listValueIds(props.channelId)) fromRules.add(id)
   return [...fromRules].map(valueId => ({

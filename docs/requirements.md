@@ -66,7 +66,9 @@
 
 ### 2.5 协议解析
 
-- Modbus RTU/TCP 协议解析
+- 文本：正则、JSON（前端引擎，已落地）
+- 厂家自定义二进制：定界符 / 长度域 / 静默超时分帧 + 字段表 + 常用校验（已落地）
+- **不做**完整 Modbus RTU/TCP 产品化（请用 Modbus Poll / Slave 等专用工具）；`CRC16-Modbus` 仅作为通用校验算法提供
 - JSON 数据字段提取
 - 正则表达式文本匹配
 - 字节模式匹配
@@ -212,5 +214,5 @@ Transport.read() → 读线程 → packets 缓冲 + rx_broadcast 广播
 - [ ] UDP 传输层实现
 - [ ] 超时断包参数可配置化（前端设置页）
 - [ ] 日志录制 BIN/CSV/HEX 格式
-- [ ] 协议解析实际实现（Modbus RTU/TCP、JSON、正则）
+- [x] 协议解析：正则 / JSON / 厂家二进制帧（前端）；不做完整 Modbus 产品
 - [ ] 转发器面板 UI 完善（统计、状态实时更新）

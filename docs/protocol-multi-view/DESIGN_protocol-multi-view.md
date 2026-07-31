@@ -19,7 +19,7 @@
 | 配置迁移 | 会话保存**解析规则**（+可选偏好）；不保存易变连接快照 |
 | 规则作用域 | **方案 B**：不绑死 channelId；仅对当前工作区通道的 RX 生效 |
 | 视图落盘 | 写入 `~/serial-tools-data/exports|channel-logs`，展示绝对路径 |
-| 本阶段不做 | 后端解析管线、Framer 接线、完整 Modbus、单视图多通道 |
+| 本阶段不做 | 后端解析管线、Rust Framer 接线、完整 Modbus 产品、单视图多通道 |
 
 ## 3. UI 信息架构
 

@@ -88,6 +88,9 @@ const availableIds = computed(() => {
     for (const f of r.fields) {
       if (f.as === 'number') ids.add(f.valueId || f.name)
     }
+    for (const f of r.binaryFields || []) {
+      ids.add(f.valueId || f.name)
+    }
   }
   for (const id of valueBus.listValueIds(props.channelId)) ids.add(id)
   return [...ids]

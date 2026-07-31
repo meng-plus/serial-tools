@@ -7,6 +7,7 @@ import {
   type TxListItem,
   type TxListTemplate,
 } from '@/workspace/schema'
+import { CHECKSUM_CATALOG } from '@/protocol/checksum'
 
 export function itemTimerKey(channelId: string, itemId: string) {
   return `${channelId}::${itemId}`
@@ -14,10 +15,14 @@ export function itemTimerKey(channelId: string, itemId: string) {
 
 /** 帧配置 + 按条目独立定时发送 */
 export const useTxPlannerStore = defineStore('txPlanner', () => {
-  const frameProfiles = ref<FrameProfile[]>([
-    { id: 'crc16', name: 'CRC16-Modbus（末尾）', checksum: 'crc16_modbus', seqOffset: -1 },
-    { id: 'sum8', name: '累加和 8 位（末尾）', checksum: 'sum8', seqOffset: -1 },
-  ])
+  const frameProfiles = ref<FrameProfile[]>(
+    CHECKSUM_CATALOG.filter(c => c.id !== 'none').map(c => ({
+      id: c.id,
+      name: `${c.name}（末尾）`,
+      checksum: c.id,
+      seqOffset: -1,
+    })),
+  )
   const listsByChannel = ref<Record<string, TxListTemplate>>({})
   /** 帧配置自带 seqOffset 用 */
   const seqByProfile = ref<Record<string, number>>({})

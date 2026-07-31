@@ -11,6 +11,7 @@
 | D | 发送编排 | txPlanner、frameBuilder、TxListView | **已完成** |
 | D2 | 定时发送 v2 | 每条独立周期/次数/变量目录+展开 | **已完成** |
 | E | 对话/VT100 | ChatView + Vt100View（xterm） | **已完成** |
+| F | 二进制协议 | BinaryFramer + checksum 目录 + binary 规则 | **已完成** |
 | DOC | 文档对齐 | DESIGN / TASK / ARCHITECTURE / ROADMAP | **已完成** |
 
 ## Phase E 文件
@@ -18,6 +19,12 @@
 - `src/views/ChatView.vue` — 气泡对话
 - `src/views/Vt100View.vue` — `@xterm/xterm` + FitAddon
 - `ViewType` 增加 `vt100`
+
+## Phase F 文件
+
+- `docs/protocol-multi-view/DESIGN_binary-protocol.md`
+- `src/protocol/checksum.ts` / `binaryFramer.ts` / `binaryDecode.ts`
+- `ParsedLogView` 二进制规则 UI；发送帧配置对齐校验目录
 
 ## Phase C / D 文件
 

@@ -70,7 +70,7 @@ const features = [
   { title: '多协议支持', desc: 'UART / TCP Client / TCP Server', icon: SwapOutlined },
   { title: '数据终端', desc: '事件驱动，UTF-8 / GBK / HEX', icon: CodeOutlined },
   { title: '端口转发', desc: '数据总线：点对点 / 广播 / 双向', icon: SwapOutlined },
-  { title: '协议解析', desc: '规则界面已就绪，管线推进中', icon: BugOutlined },
+  { title: '协议解析', desc: '正则 / JSON / 厂家二进制帧', icon: BugOutlined },
   { title: '系统日志', desc: '分级日志流；导出能力规划中', icon: FileTextOutlined },
   { title: '会话管理', desc: 'YAML 配置保存 / 加载', icon: HddOutlined },
 ]

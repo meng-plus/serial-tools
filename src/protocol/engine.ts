@@ -81,6 +81,11 @@ export function matchRule(rule: ProtocolRule, record: RxRecord): ParsedField[] |
     return fields.length > 0 ? fields : null
   }
 
+  if (rule.type === 'binary') {
+    // 二进制由 BinaryFramer 路径处理
+    return null
+  }
+
   return null
 }
 
