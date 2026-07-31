@@ -32,7 +32,7 @@
 │                        ▼                                 │
 │  ┌───────────────────────────────────────────────────┐   │
 │  │              State (AppState)                      │   │
-│  │  channels / forwarders / packets / rx_broadcast    │   │
+│  │  channels / buses / packets / rx_broadcast    │   │
 │  │  每个通道 = 1 独立读线程 + broadcast 事件广播        │   │
 │  └─────────────────────┬─────────────────────────────┘   │
 │                        ▼                                 │
@@ -65,7 +65,7 @@ serial-tools/
 │           ├── mod.rs
 │           ├── connection.rs  # 连接管理
 │           ├── data.rs        # 数据收发
-│           ├── forward.rs     # 转发管理
+│           ├── forward.rs     # 数据总线
 │           ├── protocol.rs    # 协议解析
 │           ├── log.rs         # 日志
 │           └── config.rs      # 配置管理
@@ -287,21 +287,35 @@ UART Transport (1 物理连接)
 TCP Server 功能在 `TransportConfig::TcpServer` 中有配置，但 `TcpServerTransport` 尚未实现。
 预期模型：1 监听线程 + N 客户端读线程，每个客户端一个 channel_id。
 
-## 转发器模型
+## 数据总线模型
 
 ```
-AppState.forwarders: HashMap<String, ForwarderHandle>
+AppState.buses: HashMap<String, DataBus>
 
-ForwarderHandle {
-    info: ForwarderInfo,      # 源/目标通道、方向、统计
-    cancel: Arc<AtomicBool>,  # 停止标志
-    threads: Vec<JoinHandle>, # 转发线程
+DataBus {
+    id, name,
+    subscriptions: Vec<BusSubscription>,  // 订阅列表
+    bus_tx: broadcast::Sender<Vec<u8>>,   // 内部广播通道
+    cancel: Arc<AtomicBool>,
+    threads: Vec<JoinHandle>,
+    rx_bytes, tx_bytes,
+}
+
+BusSubscription {
+    channel_id: String,
+    direction: BusDirection,  // RxToBus | TxFromBus | Both
 }
 ```
 
-转发线程订阅 `rx_broadcast`，收到数据后写入目标通道。支持：
-- 单向（source → target）
-- 双向（source ↔ target）
+订阅方向：
+- `RxToBus`: 通道 RX → 总线广播
+- `TxFromBus`: 总线广播 → 通道 TX
+- `Both`: 双向
+
+组合模式：
+- 点对点转发 = A(RxToBus) + B(TxFromBus)
+- 广播 = A(RxToBus) + B(TxFromBus) + C(TxFromBus)
+- 双向桥接 = A(Both) + B(Both)
 
 ## 前端架构
 
@@ -311,7 +325,7 @@ ForwarderHandle {
 |------|------|------|
 | 连接管理 | `ConnectionPage.vue` | 创建/配置/连接通信通道 |
 | 数据终端 | `TerminalPage.vue` | ASCII/HEX 显示收发数据 |
-| 转发管理 | `ForwardPage.vue` | 配置转发规则、监控状态 |
+| 数据总线 | `ForwardPage.vue` | 创建总线、管理订阅、监控状态 |
 | 协议解析 | `ProtocolPage.vue` | Modbus/JSON/正则匹配 |
 | 日志管理 | `LogPage.vue` | 操作日志查看/导出 |
 | 设置 | `SettingsPage.vue` | 全局配置 |
@@ -355,15 +369,24 @@ protocols:
     slave_id: 1
 ```
 
-### 转发配置
+### 总线配置
 
 ```yaml
-forwarding:
+buses:
   - name: 485-to-tcp
-    source_channel: serial-001
-    target_channel: tcp-001
-    direction: bidirectional   # bidirectional | source_to_target | target_to_source
-    enabled: true
+    subscriptions:
+      - channel: serial-001
+        direction: rx_to_bus
+      - channel: tcp-001
+        direction: tx_from_bus
+  - name: broadcast-all
+    subscriptions:
+      - channel: serial-001
+        direction: rx_to_bus
+      - channel: tcp-001
+        direction: tx_from_bus
+      - channel: tcp-002
+        direction: tx_from_bus
 ```
 
 ## 线程模型总结
@@ -372,7 +395,7 @@ forwarding:
 |------|---------|------|------|
 | Tauri 主线程 | 异步 | 1 | UI + IPC |
 | 读线程 | `std::thread`（同步阻塞） | N（每通道 1 个） | `Transport.read()` |
-| 转发线程 | `std::thread` | M（每规则 1 个） | 订阅 broadcast |
+| 总线线程 | `std::thread` | M（每订阅 1-2 个） | RxToBus 读 + TxFromBus 写 |
 | Tokio runtime | 异步 | 1 | 管理 async 任务 |
 
 **设计选择**：读线程使用 `std::thread` 而非 tokio spawn，因为 `Transport.read()` 是同步阻塞的（`serialport` 和 `std::net::TcpStream` 不支持 async）。
