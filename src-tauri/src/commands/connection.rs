@@ -149,9 +149,8 @@ pub async fn connect(
             let transport: Arc<dyn Transport> = server_arc.clone();
             state
                 .channels
-                .write()
-                .await
-                .insert(channel_id.clone(), transport);
+                .put_transport(channel_id.clone(), transport)
+                .await;
 
             // Server 自身不 spawn_reader：RX 由各客户端独占通道负责
             spawn_tcp_server_monitor(server_arc, channel_id.clone(), app.clone());
@@ -232,14 +231,10 @@ pub async fn list_server_clients(
     state: State<'_, AppState>,
 ) -> Result<Vec<ServerClientInfo>, String> {
     let parents = state.client_parents.read().await;
-    let channels = state.channels.read().await;
     let mut result = Vec::new();
     for (client_id, parent) in parents.iter() {
         if parent == &server_channel_id {
-            let connected = channels
-                .get(client_id)
-                .map(|t| t.is_active())
-                .unwrap_or(false);
+            let connected = state.channels.is_active(client_id).await;
             let addr = client_id
                 .strip_prefix("tcp_client-")
                 .unwrap_or(client_id)
@@ -260,12 +255,11 @@ pub async fn disconnect_all(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<ConnectResponse, String> {
-    let ids: Vec<String> = state.channels.read().await.keys().cloned().collect();
-    let mut ordered = ids;
+    let mut ordered = state.channels.ids().await;
     ordered.sort_by_key(|id| if id.starts_with("tcp_server-") { 0 } else { 1 });
 
     for channel_id in ordered {
-        if !state.channels.read().await.contains_key(&channel_id) {
+        if !state.channels.contains(&channel_id).await {
             continue;
         }
 
@@ -286,9 +280,7 @@ pub async fn disconnect_all(
         );
     }
 
-    state
-        .log("info", "connection", "所有通道已断开")
-        .await;
+    state.log("info", "connection", "所有通道已断开").await;
 
     Ok(ConnectResponse {
         success: true,
@@ -343,10 +335,10 @@ pub async fn set_serial_rx_timeout(
 pub async fn get_connection_status(
     state: State<'_, AppState>,
 ) -> Result<Vec<ConnectionStatusResponse>, String> {
-    let channels = state.channels.read().await;
+    let channels = state.channels.all().await;
     let parents = state.client_parents.read().await;
     let mut result = Vec::new();
-    for (id, transport) in channels.iter() {
+    for (id, transport) in channels {
         let desc = transport.descriptor();
         result.push(ConnectionStatusResponse {
             connected: transport.is_active(),
@@ -354,7 +346,7 @@ pub async fn get_connection_status(
             transport_type: desc.kind.clone(),
             port_name: desc.address.clone(),
             clients: transport.client_info(),
-            parent_channel_id: parents.get(id).cloned(),
+            parent_channel_id: parents.get(&id).cloned(),
         });
     }
     Ok(result)

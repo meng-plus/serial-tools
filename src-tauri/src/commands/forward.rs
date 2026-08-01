@@ -68,11 +68,8 @@ pub async fn subscribe_bus(
     request: SubscribeBusRequest,
     state: State<'_, AppState>,
 ) -> Result<BusResponse, String> {
-    {
-        let channels = state.channels.read().await;
-        if !channels.contains_key(&request.channel_id) {
-            return Err(format!("通道 {} 不存在", request.channel_id));
-        }
+    if !state.channels.contains(&request.channel_id).await {
+        return Err(format!("通道 {} 不存在", request.channel_id));
     }
 
     let direction = match request.direction.as_str() {
@@ -91,22 +88,26 @@ pub async fn subscribe_bus(
         return Err("总线已停止，无法订阅".to_string());
     }
 
-    if bus.subscriptions.iter().any(|s| s.channel_id == request.channel_id) {
+    if bus
+        .subscriptions
+        .iter()
+        .any(|s| s.channel_id == request.channel_id)
+    {
         return Err(format!("通道 {} 已订阅此总线", request.channel_id));
     }
 
-    let channels = state.channels.read().await;
-    let transport = channels
-        .get(&request.channel_id)
-        .ok_or_else(|| format!("通道 {} 不存在", request.channel_id))?
-        .clone();
-    drop(channels);
+    let transport = state
+        .channels
+        .get_transport(&request.channel_id)
+        .await
+        .ok_or_else(|| format!("通道 {} 不存在", request.channel_id))?;
 
     let channel_id = request.channel_id.clone();
     let bus_tx = bus.bus_tx.clone();
     let cancel = bus.cancel.clone();
     let sub_cancel = Arc::new(AtomicBool::new(false));
-    bus.sub_cancels.insert(channel_id.clone(), sub_cancel.clone());
+    bus.sub_cancels
+        .insert(channel_id.clone(), sub_cancel.clone());
 
     let rx_bytes = bus.rx_bytes.clone();
     let tx_bytes = bus.tx_bytes.clone();
@@ -122,7 +123,8 @@ pub async fn subscribe_bus(
 
         let handle = std::thread::spawn(move || {
             loop {
-                if cancel_clone.load(Ordering::Relaxed) || sub_cancel_clone.load(Ordering::Relaxed) {
+                if cancel_clone.load(Ordering::Relaxed) || sub_cancel_clone.load(Ordering::Relaxed)
+                {
                     break;
                 }
                 match rx.try_recv() {
@@ -156,7 +158,8 @@ pub async fn subscribe_bus(
 
         let handle = std::thread::spawn(move || {
             loop {
-                if cancel_clone.load(Ordering::Relaxed) || sub_cancel_clone.load(Ordering::Relaxed) {
+                if cancel_clone.load(Ordering::Relaxed) || sub_cancel_clone.load(Ordering::Relaxed)
+                {
                     break;
                 }
                 match bus_rx.try_recv() {
@@ -196,7 +199,11 @@ pub async fn subscribe_bus(
     drop(buses);
 
     state
-        .log("info", "bus", &format!("通道 {} 订阅总线 [{}] ({})", channel_id, bus_name, dir_str))
+        .log(
+            "info",
+            "bus",
+            &format!("通道 {} 订阅总线 [{}] ({})", channel_id, bus_name, dir_str),
+        )
         .await;
 
     Ok(BusResponse {
@@ -227,7 +234,11 @@ pub async fn unsubscribe_bus(
     drop(buses);
 
     state
-        .log("info", "bus", &format!("通道 {} 取消订阅总线 [{}]", channel_id, bus_name))
+        .log(
+            "info",
+            "bus",
+            &format!("通道 {} 取消订阅总线 [{}]", channel_id, bus_name),
+        )
         .await;
 
     Ok(BusResponse {
@@ -239,9 +250,7 @@ pub async fn unsubscribe_bus(
 
 /// 列出所有总线
 #[tauri::command]
-pub async fn list_buses(
-    state: State<'_, AppState>,
-) -> Result<Vec<BusInfo>, String> {
+pub async fn list_buses(state: State<'_, AppState>) -> Result<Vec<BusInfo>, String> {
     let buses = state.buses.read().await;
     Ok(buses
         .values()
@@ -273,10 +282,7 @@ pub async fn list_buses(
 
 /// 停止总线
 #[tauri::command]
-pub async fn stop_bus(
-    bus_id: String,
-    state: State<'_, AppState>,
-) -> Result<BusResponse, String> {
+pub async fn stop_bus(bus_id: String, state: State<'_, AppState>) -> Result<BusResponse, String> {
     let mut buses = state.buses.write().await;
     let bus = buses
         .get_mut(&bus_id)
@@ -307,10 +313,7 @@ pub async fn stop_bus(
 
 /// 删除总线（必须先停止）
 #[tauri::command]
-pub async fn delete_bus(
-    bus_id: String,
-    state: State<'_, AppState>,
-) -> Result<bool, String> {
+pub async fn delete_bus(bus_id: String, state: State<'_, AppState>) -> Result<bool, String> {
     let mut buses = state.buses.write().await;
     let bus = buses
         .get(&bus_id)

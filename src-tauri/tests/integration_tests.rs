@@ -127,9 +127,7 @@ fn test_mock_transport_read_after_close_fails() {
 #[tokio::test]
 async fn test_appstate_default() {
     let state = serial_tools_lib::state::AppState::default();
-    let channels = state.channels.read().await;
-    assert!(channels.is_empty());
-    drop(channels);
+    assert_eq!(state.channels.count().await, 0);
 
     let packets = state.packets.lock().await;
     assert!(packets.is_empty());
@@ -208,18 +206,18 @@ async fn test_appstate_channel_insert_and_remove() {
     let state = serial_tools_lib::state::AppState::default();
 
     let mock = Arc::new(make_open_mock("serial", "COM1"));
-    state.channels.write().await.insert("test-ch".to_string(), mock);
+    state
+        .channels
+        .put_transport("test-ch".to_string(), mock)
+        .await;
 
-    {
-        let channels = state.channels.read().await;
-        assert!(channels.contains_key("test-ch"));
-        assert!(channels["test-ch"].is_active());
-    }
+    assert!(state.channels.contains("test-ch").await);
+    assert!(state.channels.is_active("test-ch").await);
 
     // 移除（不需要读线程的情况）
-    state.channels.write().await.remove("test-ch");
-    let channels = state.channels.read().await;
-    assert!(!channels.contains_key("test-ch"));
+    let (transport, _, _) = state.channels.remove("test-ch").await;
+    assert!(transport.is_some());
+    assert!(!state.channels.contains("test-ch").await);
 }
 
 #[tokio::test]
@@ -227,7 +225,10 @@ async fn test_appstate_send_to_channel() {
     let state = serial_tools_lib::state::AppState::default();
 
     let mock = Arc::new(make_open_mock("serial", "COM1"));
-    state.channels.write().await.insert("ch1".to_string(), mock.clone());
+    state
+        .channels
+        .put_transport("ch1".to_string(), mock.clone())
+        .await;
 
     let sent = state.send_to_channel("ch1", b"test data").await.unwrap();
     assert_eq!(sent, 9);
@@ -283,7 +284,9 @@ async fn test_tcp_loopback_send_receive() {
     // 在线程中运行 server
     let server_handle = std::thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
-        stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
 
         // 读取 client 发来的数据
         let mut buf = [0u8; 1024];
@@ -334,7 +337,9 @@ async fn test_tcp_loopback_multi_send() {
 
     let server_handle = std::thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
-        stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
 
         let mut received_all = Vec::new();
         let mut buf = [0u8; 1024];
@@ -497,7 +502,9 @@ async fn test_forward_tcp_to_mock_serial() {
     // TCP server 线程：接收数据后回传
     let server_handle = std::thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
-        stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
         let mut buf = [0u8; 1024];
         let n = stream.read(&mut buf).unwrap();
         stream.write_all(&buf[..n]).unwrap();
@@ -543,7 +550,9 @@ async fn test_forward_tcp_to_tcp() {
     // Server1 线程：接收并回传
     let s1 = std::thread::spawn(move || {
         let (mut stream, _) = listener1.accept().unwrap();
-        stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
         let mut buf = [0u8; 1024];
         let n = stream.read(&mut buf).unwrap();
         stream.write_all(&buf[..n]).unwrap();
@@ -552,7 +561,9 @@ async fn test_forward_tcp_to_tcp() {
     // Server2 线程：接收并回传
     let s2 = std::thread::spawn(move || {
         let (mut stream, _) = listener2.accept().unwrap();
-        stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
         let mut buf = [0u8; 1024];
         let n = stream.read(&mut buf).unwrap();
         stream.write_all(&buf[..n]).unwrap();
@@ -699,8 +710,10 @@ async fn test_tcp_server_multi_client_concurrent() {
     // 连接两个客户端
     let mut c1 = TcpStream::connect(format!("127.0.0.1:{}", port)).unwrap();
     let mut c2 = TcpStream::connect(format!("127.0.0.1:{}", port)).unwrap();
-    c1.set_read_timeout(Some(std::time::Duration::from_millis(500))).unwrap();
-    c2.set_read_timeout(Some(std::time::Duration::from_millis(500))).unwrap();
+    c1.set_read_timeout(Some(std::time::Duration::from_millis(500)))
+        .unwrap();
+    c2.set_read_timeout(Some(std::time::Duration::from_millis(500)))
+        .unwrap();
     std::thread::sleep(std::time::Duration::from_millis(300));
 
     let mut new_clients = server.take_new_clients();
@@ -717,7 +730,10 @@ async fn test_tcp_server_multi_client_concurrent() {
     let mut n = 0;
     for _ in 0..30 {
         match peer1.read(&mut buf) {
-            Ok(sz) if sz > 0 => { n = sz; break; }
+            Ok(sz) if sz > 0 => {
+                n = sz;
+                break;
+            }
             _ => std::thread::sleep(std::time::Duration::from_millis(20)),
         }
     }
@@ -729,7 +745,10 @@ async fn test_tcp_server_multi_client_concurrent() {
     n = 0;
     for _ in 0..30 {
         match peer2.read(&mut buf) {
-            Ok(sz) if sz > 0 => { n = sz; break; }
+            Ok(sz) if sz > 0 => {
+                n = sz;
+                break;
+            }
             _ => std::thread::sleep(std::time::Duration::from_millis(20)),
         }
     }

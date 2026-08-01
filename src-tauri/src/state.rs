@@ -10,8 +10,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::AppHandle;
 use tokio::sync::{broadcast, Mutex, RwLock};
-use transport::Transport;
 use transport::tcp::TcpServerTransport;
+use transport::Transport;
 
 use crate::channel_lifecycle::{finalize_from_app, note_reader_exit_from_app};
 use crate::disconnect_reason::DisconnectReason;
@@ -98,10 +98,103 @@ pub struct BusSubInfo {
 
 // ── 应用全局状态 ────────────────────────────────────────────────
 
+/// 串口超时分包时间对（字节间超时, 帧超时）
+type SerialTimeoutPair = (AtomicU64, AtomicU64);
+
+/// 通道注册表：transport / cancel / 读线程句柄三表同步收口。
+///
+/// 原三张平行 `HashMap` 依赖调用方保证同步，移除时容易漂移；
+/// 收敛为单一入口后，`remove` 原子取走三项，杜绝「cancel 清了但 channel 还在」。
+pub struct ChannelRegistry {
+    channels: Arc<RwLock<HashMap<String, Arc<dyn Transport>>>>,
+    cancels: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
+    readers: Arc<RwLock<HashMap<String, std::thread::JoinHandle<()>>>>,
+}
+
+impl ChannelRegistry {
+    pub fn new() -> Self {
+        Self {
+            channels: Arc::new(RwLock::new(HashMap::new())),
+            cancels: Arc::new(RwLock::new(HashMap::new())),
+            readers: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    /// 注册传输（读线程启动前调用）
+    pub async fn put_transport(&self, channel_id: String, transport: Arc<dyn Transport>) {
+        self.channels.write().await.insert(channel_id, transport);
+    }
+
+    /// 注册取消标志（读线程启动前调用，保证并发移除可及时 cancel）
+    pub async fn put_cancel(&self, channel_id: String, cancel: Arc<AtomicBool>) {
+        self.cancels.write().await.insert(channel_id, cancel);
+    }
+
+    /// 注册读线程句柄（读线程创建后调用）
+    pub async fn put_reader(&self, channel_id: String, reader: std::thread::JoinHandle<()>) {
+        self.readers.write().await.insert(channel_id, reader);
+    }
+
+    pub async fn get_transport(&self, channel_id: &str) -> Option<Arc<dyn Transport>> {
+        self.channels.read().await.get(channel_id).cloned()
+    }
+
+    pub async fn contains(&self, channel_id: &str) -> bool {
+        self.channels.read().await.contains_key(channel_id)
+    }
+
+    pub async fn is_active(&self, channel_id: &str) -> bool {
+        self.channels
+            .read()
+            .await
+            .get(channel_id)
+            .map(|t| t.is_active())
+            .unwrap_or(false)
+    }
+
+    pub async fn ids(&self) -> Vec<String> {
+        self.channels.read().await.keys().cloned().collect()
+    }
+
+    pub async fn count(&self) -> usize {
+        self.channels.read().await.len()
+    }
+
+    /// 遍历全部通道（含传输引用），供状态快照
+    pub async fn all(&self) -> Vec<(String, Arc<dyn Transport>)> {
+        self.channels
+            .read()
+            .await
+            .iter()
+            .map(|(id, t)| (id.clone(), t.clone()))
+            .collect()
+    }
+
+    /// 原子取走 transport + cancel + 读线程句柄；未注册的项返回 None
+    pub async fn remove(
+        &self,
+        channel_id: &str,
+    ) -> (
+        Option<Arc<dyn Transport>>,
+        Option<Arc<AtomicBool>>,
+        Option<std::thread::JoinHandle<()>>,
+    ) {
+        let transport = self.channels.write().await.remove(channel_id);
+        let cancel = self.cancels.write().await.remove(channel_id);
+        let reader = self.readers.write().await.remove(channel_id);
+        (transport, cancel, reader)
+    }
+}
+
+impl Default for ChannelRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct AppState {
-    pub channels: Arc<RwLock<HashMap<String, Arc<dyn Transport>>>>,
-    pub channel_cancels: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
-    pub channel_readers: Arc<RwLock<HashMap<String, std::thread::JoinHandle<()>>>>,
+    /// 通道注册表：transport / cancel / 读线程句柄三表同步收口
+    pub channels: Arc<ChannelRegistry>,
     pub tcp_servers: Arc<RwLock<HashMap<String, Arc<TcpServerTransport>>>>,
     pub client_parents: Arc<RwLock<HashMap<String, String>>>,
     pub buses: RwLock<HashMap<String, DataBus>>,
@@ -112,7 +205,7 @@ pub struct AppState {
     /// 单调递增包序号，供前端去重/增量拉取
     pub packet_seq: Arc<AtomicU64>,
     /// 串口超时分包：(byte_timeout_ms, frame_timeout_ms)，仅 serial 通道使用
-    pub serial_rx_timeouts: Arc<RwLock<HashMap<String, Arc<(AtomicU64, AtomicU64)>>>>,
+    pub serial_rx_timeouts: Arc<RwLock<HashMap<String, Arc<SerialTimeoutPair>>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -128,9 +221,7 @@ impl Default for AppState {
         let (rx_broadcast, _) = broadcast::channel(1024);
         let (log_broadcast, _) = broadcast::channel(256);
         Self {
-            channels: Arc::new(RwLock::new(HashMap::new())),
-            channel_cancels: Arc::new(RwLock::new(HashMap::new())),
-            channel_readers: Arc::new(RwLock::new(HashMap::new())),
+            channels: Arc::new(ChannelRegistry::new()),
             tcp_servers: Arc::new(RwLock::new(HashMap::new())),
             client_parents: Arc::new(RwLock::new(HashMap::new())),
             buses: RwLock::new(HashMap::new()),
@@ -212,10 +303,9 @@ impl AppState {
         app: AppHandle,
     ) {
         let cancel = Arc::new(AtomicBool::new(false));
-        self.channel_cancels
-            .write()
-            .await
-            .insert(channel_id.clone(), cancel.clone());
+        self.channels
+            .put_cancel(channel_id.clone(), cancel.clone())
+            .await;
 
         let packets = self.packets.clone();
         let rx_tx = self.rx_broadcast.clone();
@@ -246,9 +336,7 @@ impl AppState {
                 if data.is_empty() {
                     return;
                 }
-                let ts = chrono::Local::now()
-                    .format("%H:%M:%S%.3f")
-                    .to_string();
+                let ts = chrono::Local::now().format("%H:%M:%S%.3f").to_string();
                 let hex_str = hex::encode(&data);
                 let text = String::from_utf8_lossy(&data).to_string();
                 let seq = seq_counter.fetch_add(1, Ordering::Relaxed) + 1;
@@ -357,15 +445,13 @@ impl AppState {
             }
         });
 
-        self.channel_readers
-            .write()
-            .await
-            .insert(channel_id.clone(), handle);
+        self.channels.put_reader(channel_id.clone(), handle).await;
     }
 
     /// 停止 channel：先关传输解除阻塞，再在 blocking 池 join 读线程（避免死锁）
     pub async fn remove_channel(&self, channel_id: &str) {
-        if let Some(cancel) = self.channel_cancels.write().await.remove(channel_id) {
+        let (transport, cancel, reader) = self.channels.remove(channel_id).await;
+        if let Some(cancel) = cancel {
             cancel.store(true, Ordering::Relaxed);
         }
 
@@ -373,7 +459,7 @@ impl AppState {
         if let Some(server) = self.tcp_servers.write().await.remove(channel_id) {
             let _ = server.shutdown();
         }
-        if let Some(transport) = self.channels.write().await.remove(channel_id) {
+        if let Some(transport) = transport {
             let _ = transport.shutdown();
         }
         self.client_parents.write().await.remove(channel_id);
@@ -382,7 +468,7 @@ impl AppState {
             t.remove(channel_id);
         }
 
-        if let Some(handle) = self.channel_readers.write().await.remove(channel_id) {
+        if let Some(handle) = reader {
             let join = tokio::task::spawn_blocking(move || {
                 let _ = handle.join();
             });
@@ -391,14 +477,11 @@ impl AppState {
         }
     }
 
-    pub async fn send_to_channel(
-        &self,
-        channel_id: &str,
-        bytes: &[u8],
-    ) -> Result<usize, String> {
-        let channels = self.channels.read().await;
-        let transport = channels
-            .get(channel_id)
+    pub async fn send_to_channel(&self, channel_id: &str, bytes: &[u8]) -> Result<usize, String> {
+        let transport = self
+            .channels
+            .get_transport(channel_id)
+            .await
             .ok_or_else(|| format!("通道 {} 不存在", channel_id))?;
         transport
             .write(bytes)

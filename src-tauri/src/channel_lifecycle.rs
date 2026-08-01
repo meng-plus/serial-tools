@@ -68,9 +68,8 @@ impl AppState {
         app: AppHandle,
     ) {
         self.channels
-            .write()
-            .await
-            .insert(channel_id.clone(), transport.clone());
+            .put_transport(channel_id.clone(), transport.clone())
+            .await;
         self.spawn_reader(channel_id, transport, app).await;
     }
 
@@ -159,11 +158,10 @@ impl AppState {
             self.kick_server_client(parent_id, channel_id).await;
         }
 
-        if let Some(t) = self.channels.write().await.remove(channel_id) {
+        let (transport, _, _) = self.channels.remove(channel_id).await;
+        if let Some(t) = transport {
             let _ = t.shutdown();
         }
-        self.channel_cancels.write().await.remove(channel_id);
-        self.channel_readers.write().await.remove(channel_id);
         self.client_parents.write().await.remove(channel_id);
 
         let remaining = if let Some(ref parent_id) = parent {
@@ -217,9 +215,7 @@ impl AppState {
     /// 本端已 cancel 时读线程退出记日志
     pub async fn note_reader_exit(&self, channel_id: &str) {
         let entry = LogEntry {
-            timestamp: chrono::Local::now()
-                .format("%H:%M:%S%.3f")
-                .to_string(),
+            timestamp: chrono::Local::now().format("%H:%M:%S%.3f").to_string(),
             level: "info".to_string(),
             source: "reader".to_string(),
             message: format!("读线程退出: {}", channel_id),
@@ -246,11 +242,7 @@ pub fn finalize_from_app(
     });
 }
 
-pub fn note_reader_exit_from_app(
-    app: &AppHandle,
-    rt: &tokio::runtime::Handle,
-    channel_id: &str,
-) {
+pub fn note_reader_exit_from_app(app: &AppHandle, rt: &tokio::runtime::Handle, channel_id: &str) {
     let state = app.state::<AppState>();
     rt.block_on(async {
         state.note_reader_exit(channel_id).await;
