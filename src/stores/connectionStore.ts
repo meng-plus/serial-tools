@@ -192,6 +192,8 @@ export const useConnectionStore = defineStore('connection', () => {
     host?: string
     tcp_port?: number
     half_duplex?: boolean
+    byte_timeout_ms?: number
+    frame_timeout_ms?: number
   }) {
     const result = await invoke<{ success: boolean; message: string; channel_id: string }>(
       'connect', { request: config }

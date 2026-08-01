@@ -45,12 +45,13 @@
         <a-select-option value="lf">LF</a-select-option>
         <a-select-option value="crlf">CRLF</a-select-option>
       </a-select>
-      <a-input
+      <a-textarea
         v-model:value="payload"
         size="small"
         class="send-input"
-        :placeholder="sendFormat === 'hex' ? '01 03 00 00' : '输入消息，Enter 发送'"
-        @pressEnter="handleSend"
+        :placeholder="sendFormat === 'hex' ? 'HEX，Enter 发送 / Shift+Enter 换行' : 'Enter 发送 / Shift+Enter 换行'"
+        :auto-size="{ minRows: 1, maxRows: 3 }"
+        @keydown="onSendKey"
       />
       <a-button type="primary" size="small" :loading="sending" @click="handleSend">发送</a-button>
     </div>
@@ -126,6 +127,14 @@ async function scrollIfNeeded() {
   await nextTick()
   const el = listRef.value
   if (el) el.scrollTop = el.scrollHeight
+}
+
+function onSendKey(e: KeyboardEvent) {
+  if (e.isComposing) return
+  if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey) {
+    e.preventDefault()
+    void handleSend()
+  }
 }
 
 async function handleSend() {

@@ -245,7 +245,7 @@ function handleSendKeydown(e: KeyboardEvent) {
 }
 .channel-tag {
   color: #555;
-  font-size: 11px;
+  font-size: 0.92em;
   margin: 0 4px;
 }
 .send-bar {

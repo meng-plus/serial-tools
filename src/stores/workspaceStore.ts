@@ -31,6 +31,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const activeChannelId = ref<string>('')
   const viewsByChannel = ref<Record<string, ViewInstance[]>>({})
   const activeViewIdByChannel = ref<Record<string, string>>({})
+  /** 当前活动视图沉浸铺满窗口（F11） */
+  const viewImmersive = ref(false)
+
+  function setViewImmersive(on: boolean) {
+    viewImmersive.value = on
+    document.body.classList.toggle('view-immersive', on)
+  }
+
+  function toggleViewImmersive() {
+    setViewImmersive(!viewImmersive.value)
+  }
+
+  function exitViewImmersive() {
+    if (viewImmersive.value) setViewImmersive(false)
+  }
 
   const activeViews = computed(() => {
     const id = activeChannelId.value
@@ -69,6 +84,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   function openChannel(channelId: string) {
     ensureChannel(channelId)
+    if (activeChannelId.value !== channelId) exitViewImmersive()
     activeChannelId.value = channelId
   }
 
@@ -122,6 +138,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     activeViewIdByChannel.value = restActive
     if (activeChannelId.value === channelId) {
       activeChannelId.value = ''
+      exitViewImmersive()
     }
   }
 
@@ -166,6 +183,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     viewsByChannel,
     activeViews,
     activeViewId,
+    viewImmersive,
+    setViewImmersive,
+    toggleViewImmersive,
+    exitViewImmersive,
     openChannel,
     ensureChannel,
     addView,

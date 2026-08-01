@@ -1,7 +1,14 @@
 <template>
   <a-config-provider :locale="zhCN">
-    <a-layout class="app-layout">
-      <a-layout-sider v-model:collapsed="collapsed" :trigger="null" collapsible theme="dark" :width="220">
+    <a-layout class="app-layout" :class="{ 'chrome-hidden': workspaceStore.viewImmersive }">
+      <a-layout-sider
+        v-show="!workspaceStore.viewImmersive"
+        v-model:collapsed="collapsed"
+        :trigger="null"
+        collapsible
+        theme="dark"
+        :width="220"
+      >
         <div class="logo">
           <img v-if="collapsed" src="/app-icon.png" alt="" class="logo-img" />
           <template v-else>
@@ -39,7 +46,7 @@
       </a-layout-sider>
 
       <a-layout>
-        <a-layout-header class="header">
+        <a-layout-header v-show="!workspaceStore.viewImmersive" class="header">
           <div class="header-left">
             <component :is="collapsed ? MenuUnfoldOutlined : MenuFoldOutlined" class="trigger" @click="collapsed = !collapsed" />
             <div class="page-title">{{ pageTitle }}</div>
@@ -54,8 +61,8 @@
           </div>
         </a-layout-header>
 
-        <a-layout-content class="content">
-          <a-alert v-if="!isTauriEnv" type="warning" show-icon message="浏览器预览模式" description="请使用 npm run tauri dev 启动桌面窗口。" style="margin-bottom: 16px" />
+        <a-layout-content class="content" :class="{ immersive: workspaceStore.viewImmersive }">
+          <a-alert v-if="!isTauriEnv && !workspaceStore.viewImmersive" type="warning" show-icon message="浏览器预览模式" description="请使用 npm run tauri dev 启动桌面窗口。" style="margin-bottom: 16px" />
           <router-view v-slot="{ Component }">
             <transition name="fade" mode="out-in">
               <component :is="Component" />
@@ -63,7 +70,7 @@
           </router-view>
         </a-layout-content>
 
-        <a-layout-footer class="footer">
+        <a-layout-footer v-show="!workspaceStore.viewImmersive" class="footer">
           <a-space split>
             <span>Serial Tools v0.1.0</span>
             <span>RX: {{ terminalStore.rxCount }} | TX: {{ terminalStore.txCount }}</span>
@@ -268,6 +275,14 @@ onUnmounted(() => {
   border-radius: 8px;
   min-height: calc(100vh - 64px - 70px - 32px);
   box-shadow: 0 1px 4px rgba(0, 21, 41, 0.06);
+}
+
+.content.immersive {
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  min-height: 100vh;
+  box-shadow: none;
 }
 
 .footer {

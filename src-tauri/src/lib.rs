@@ -31,6 +31,7 @@ pub fn run() {
             commands::connection::list_server_clients,
             commands::connection::list_ports,
             commands::connection::get_connection_status,
+            commands::connection::set_serial_rx_timeout,
             // 数据收发
             commands::data::send_data,
             commands::data::get_packets,

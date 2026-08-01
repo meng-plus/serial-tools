@@ -62,6 +62,18 @@
               <a-form-item>
                 <a-checkbox v-model:checked="form.half_duplex">RS485 半双工</a-checkbox>
               </a-form-item>
+              <a-row :gutter="12">
+                <a-col :span="12">
+                  <a-form-item label="字节超时断包 (ms)">
+                    <a-input-number v-model:value="form.byte_timeout_ms" :min="5" :max="5000" style="width: 100%" />
+                  </a-form-item>
+                </a-col>
+                <a-col :span="12">
+                  <a-form-item label="帧超时 (ms)">
+                    <a-input-number v-model:value="form.frame_timeout_ms" :min="20" :max="10000" style="width: 100%" />
+                  </a-form-item>
+                </a-col>
+              </a-row>
             </template>
 
             <template v-if="form.conn_type === 'tcp_client'">
@@ -163,8 +175,10 @@ import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { ReloadOutlined } from '@ant-design/icons-vue'
 import { useConnectionStore } from '@/stores'
+import { loadAppSettings, saveChannelTimeout } from '@/utils/appSettings'
 
 const FORM_STORAGE_KEY = 'serial-tools-conn-form'
+const appDefaults = loadAppSettings()
 
 const router = useRouter()
 const connectionStore = useConnectionStore()
@@ -206,6 +220,8 @@ function saveForm() {
     host: form.host,
     bind_addr: form.bind_addr,
     tcp_port: form.tcp_port,
+    byte_timeout_ms: form.byte_timeout_ms,
+    frame_timeout_ms: form.frame_timeout_ms,
   }))
 }
 
@@ -213,7 +229,7 @@ const saved = loadSavedForm()
 const form = reactive({
   conn_type: saved?.conn_type || 'serial',
   port: saved?.port || '',
-  baud_rate: saved?.baud_rate || 115200,
+  baud_rate: saved?.baud_rate || appDefaults.defaultBaudRate,
   data_bits: saved?.data_bits || 8,
   stop_bits: saved?.stop_bits || 1,
   parity: saved?.parity || 'None',
@@ -221,6 +237,8 @@ const form = reactive({
   host: saved?.host || '192.168.1.100',
   bind_addr: saved?.bind_addr || '0.0.0.0',
   tcp_port: saved?.tcp_port || 5000,
+  byte_timeout_ms: saved?.byte_timeout_ms || appDefaults.serialByteTimeoutMs,
+  frame_timeout_ms: saved?.frame_timeout_ms || appDefaults.serialFrameTimeoutMs,
 })
 
 async function handleConnect() {
@@ -234,10 +252,15 @@ async function handleConnect() {
       host: form.conn_type === 'tcp_client' ? form.host : (form.conn_type === 'tcp_server' ? form.bind_addr : undefined),
       tcp_port: form.conn_type !== 'serial' ? form.tcp_port : undefined,
       half_duplex: form.conn_type === 'serial' ? form.half_duplex : undefined,
+      byte_timeout_ms: form.conn_type === 'serial' ? form.byte_timeout_ms : undefined,
+      frame_timeout_ms: form.conn_type === 'serial' ? form.frame_timeout_ms : undefined,
     })
     if (result.success) {
       message.success(result.message)
       if (result.channel_id) {
+        if (form.conn_type === 'serial') {
+          saveChannelTimeout(result.channel_id, form.byte_timeout_ms, form.frame_timeout_ms)
+        }
         router.push({ name: 'workspace', params: { channelId: result.channel_id } })
       }
     }

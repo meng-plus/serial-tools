@@ -17,6 +17,10 @@ pub struct ConnectRequest {
     pub host: Option<String>,
     pub tcp_port: Option<u16>,
     pub half_duplex: Option<bool>,
+    /// 串口字节间超时断包（ms）
+    pub byte_timeout_ms: Option<u64>,
+    /// 串口帧超时强制断包（ms）
+    pub frame_timeout_ms: Option<u64>,
 }
 
 #[derive(serde::Serialize)]
@@ -77,6 +81,11 @@ pub async fn connect(
 
             let channel_id = format!("serial-{}", port);
             let addr = port.clone();
+            let byte_ms = request.byte_timeout_ms.unwrap_or(50);
+            let frame_ms = request.frame_timeout_ms.unwrap_or(200);
+            let _ = state
+                .set_serial_timeouts(&channel_id, byte_ms, frame_ms)
+                .await;
             let transport: Arc<dyn Transport> = Arc::new(transport);
             state
                 .register_channel(channel_id.clone(), transport, app.clone())
@@ -299,6 +308,34 @@ pub async fn list_ports() -> Result<Vec<PortInfoResponse>, String> {
             description: format!("{:?}", p.port_type),
         })
         .collect())
+}
+
+/// 运行中更新串口超时分包参数（仅 serial 通道）
+#[tauri::command]
+pub async fn set_serial_rx_timeout(
+    channel_id: String,
+    byte_timeout_ms: u64,
+    frame_timeout_ms: Option<u64>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    if !channel_id.starts_with("serial-") {
+        return Err("仅串口通道支持超时分包".into());
+    }
+    let frame_ms = frame_timeout_ms.unwrap_or_else(|| byte_timeout_ms.saturating_mul(4).max(200));
+    state
+        .set_serial_timeouts(&channel_id, byte_timeout_ms, frame_ms)
+        .await?;
+    state
+        .log(
+            "info",
+            "connection",
+            &format!(
+                "串口 {} 断包超时: byte={}ms frame={}ms",
+                channel_id, byte_timeout_ms, frame_ms
+            ),
+        )
+        .await;
+    Ok(())
 }
 
 /// 获取所有连接状态

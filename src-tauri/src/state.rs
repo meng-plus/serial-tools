@@ -111,6 +111,8 @@ pub struct AppState {
     pub log_broadcast: broadcast::Sender<LogEntry>,
     /// 单调递增包序号，供前端去重/增量拉取
     pub packet_seq: Arc<AtomicU64>,
+    /// 串口超时分包：(byte_timeout_ms, frame_timeout_ms)，仅 serial 通道使用
+    pub serial_rx_timeouts: Arc<RwLock<HashMap<String, Arc<(AtomicU64, AtomicU64)>>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -137,6 +139,7 @@ impl Default for AppState {
             logs: Arc::new(Mutex::new(Vec::with_capacity(1000))),
             log_broadcast,
             packet_seq: Arc::new(AtomicU64::new(0)),
+            serial_rx_timeouts: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 }
@@ -166,6 +169,39 @@ impl AppState {
         self.packet_seq.fetch_add(1, Ordering::Relaxed) + 1
     }
 
+    /// 若不存在则创建；已存在则不覆盖（避免 spawn 覆盖 connect 传入值）
+    pub async fn get_or_init_serial_timeouts(
+        &self,
+        channel_id: &str,
+        byte_timeout_ms: u64,
+        frame_timeout_ms: u64,
+    ) -> Arc<(AtomicU64, AtomicU64)> {
+        let mut map = self.serial_rx_timeouts.write().await;
+        if let Some(existing) = map.get(channel_id) {
+            return existing.clone();
+        }
+        let pair = Arc::new((
+            AtomicU64::new(byte_timeout_ms.max(1)),
+            AtomicU64::new(frame_timeout_ms.max(1)),
+        ));
+        map.insert(channel_id.to_string(), pair.clone());
+        pair
+    }
+
+    pub async fn set_serial_timeouts(
+        &self,
+        channel_id: &str,
+        byte_timeout_ms: u64,
+        frame_timeout_ms: u64,
+    ) -> Result<(), String> {
+        let pair = self
+            .get_or_init_serial_timeouts(channel_id, byte_timeout_ms, frame_timeout_ms)
+            .await;
+        pair.0.store(byte_timeout_ms.max(1), Ordering::Relaxed);
+        pair.1.store(frame_timeout_ms.max(1), Ordering::Relaxed);
+        Ok(())
+    }
+
     /// 为某个 channel 启动读线程
     ///
     /// 对端断开经 `finalize_from_app` 收口；本端 `remove_channel` 置 cancel，不重复 emit。
@@ -186,13 +222,84 @@ impl AppState {
         let seq_counter = self.packet_seq.clone();
         let cid = channel_id.clone();
         let rt = tokio::runtime::Handle::current();
+        let use_framer = transport.descriptor().kind == "serial";
+        let timeout_pair = if use_framer {
+            Some(self.get_or_init_serial_timeouts(&channel_id, 50, 200).await)
+        } else {
+            None
+        };
 
         let handle = std::thread::spawn(move || {
+            use transport::framer::{Framer, FramerConfig};
+
             let mut buf = [0u8; 4096];
             let mut peer_reason: Option<DisconnectReason> = None;
+            let mut framer = timeout_pair.as_ref().map(|pair| {
+                Framer::new(FramerConfig {
+                    byte_timeout_ms: pair.0.load(Ordering::Relaxed),
+                    frame_timeout_ms: pair.1.load(Ordering::Relaxed),
+                    delimiter: None,
+                })
+            });
+
+            let emit_chunk = |data: Vec<u8>| {
+                if data.is_empty() {
+                    return;
+                }
+                let ts = chrono::Local::now()
+                    .format("%H:%M:%S%.3f")
+                    .to_string();
+                let hex_str = hex::encode(&data);
+                let text = String::from_utf8_lossy(&data).to_string();
+                let seq = seq_counter.fetch_add(1, Ordering::Relaxed) + 1;
+                {
+                    let pkts = packets.clone();
+                    let cid = cid.clone();
+                    let ts2 = ts.clone();
+                    let data2 = data.clone();
+                    let hex2 = hex_str;
+                    let text2 = text;
+                    rt.block_on(async {
+                        let mut pkts = pkts.lock().await;
+                        pkts.push(PacketEntry {
+                            timestamp: ts2,
+                            direction: "rx".to_string(),
+                            channel_id: cid,
+                            bytes: data2,
+                            hex: hex2,
+                            text: text2,
+                            seq,
+                        });
+                        if pkts.len() > 10000 {
+                            let drain = pkts.len() - 8000;
+                            pkts.drain(..drain);
+                        }
+                    });
+                }
+                let _ = rx_tx.send(RxBroadcastEvent {
+                    channel_id: cid.clone(),
+                    bytes: data,
+                    timestamp: ts,
+                    seq,
+                });
+            };
+
+            let flush_framer = |framer: &mut Framer| {
+                while let Some(frame) = framer.try_extract() {
+                    emit_chunk(frame);
+                }
+            };
+
             loop {
                 if cancel.load(Ordering::Relaxed) {
                     break;
+                }
+                if let (Some(framer), Some(pair)) = (framer.as_mut(), timeout_pair.as_ref()) {
+                    framer.set_config(FramerConfig {
+                        byte_timeout_ms: pair.0.load(Ordering::Relaxed),
+                        frame_timeout_ms: pair.1.load(Ordering::Relaxed),
+                        delimiter: None,
+                    });
                 }
                 match transport.read(&mut buf) {
                     Ok(0) => {
@@ -207,43 +314,19 @@ impl AppState {
                             }
                             break;
                         }
+                        if let Some(framer) = framer.as_mut() {
+                            flush_framer(framer);
+                        }
                         std::thread::sleep(std::time::Duration::from_millis(5));
                     }
                     Ok(n) => {
                         let data = buf[..n].to_vec();
-                        let ts = chrono::Local::now()
-                            .format("%H:%M:%S%.3f")
-                            .to_string();
-                        let hex_str = hex::encode(&data);
-                        let text = String::from_utf8_lossy(&data).to_string();
-                        let seq = seq_counter.fetch_add(1, Ordering::Relaxed) + 1;
-
-                        {
-                            let pkts = packets.clone();
-                            rt.block_on(async {
-                                let mut pkts = pkts.lock().await;
-                                pkts.push(PacketEntry {
-                                    timestamp: ts.clone(),
-                                    direction: "rx".to_string(),
-                                    channel_id: cid.clone(),
-                                    bytes: data.clone(),
-                                    hex: hex_str,
-                                    text,
-                                    seq,
-                                });
-                                if pkts.len() > 10000 {
-                                    let drain = pkts.len() - 8000;
-                                    pkts.drain(..drain);
-                                }
-                            });
+                        if let Some(framer) = framer.as_mut() {
+                            framer.feed(&data);
+                            flush_framer(framer);
+                        } else {
+                            emit_chunk(data);
                         }
-
-                        let _ = rx_tx.send(RxBroadcastEvent {
-                            channel_id: cid.clone(),
-                            bytes: data,
-                            timestamp: ts,
-                            seq,
-                        });
                     }
                     Err(e) => {
                         if cancel.load(Ordering::Relaxed) {
@@ -255,6 +338,10 @@ impl AppState {
                                 peer_reason = Some(DisconnectReason::Error);
                                 break;
                             }
+                        }
+                        // 读超时：推进串口 Framer 的 byte/frame 超时判断
+                        if let Some(framer) = framer.as_mut() {
+                            flush_framer(framer);
                         }
                         std::thread::sleep(std::time::Duration::from_millis(10));
                     }
@@ -290,6 +377,10 @@ impl AppState {
             let _ = transport.shutdown();
         }
         self.client_parents.write().await.remove(channel_id);
+        {
+            let mut t = self.serial_rx_timeouts.write().await;
+            t.remove(channel_id);
+        }
 
         if let Some(handle) = self.channel_readers.write().await.remove(channel_id) {
             let join = tokio::task::spawn_blocking(move || {

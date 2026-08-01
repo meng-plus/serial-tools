@@ -43,6 +43,15 @@ impl Framer {
         }
     }
 
+    /// 运行中更新超时等配置（保留缓冲）
+    pub fn set_config(&mut self, config: FramerConfig) {
+        self.config = config;
+    }
+
+    pub fn config(&self) -> &FramerConfig {
+        &self.config
+    }
+
     /// 喂入新数据
     pub fn feed(&mut self, data: &[u8]) {
         if data.is_empty() {
