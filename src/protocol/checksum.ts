@@ -17,24 +17,57 @@ export type ChecksumAlgo =
 
 export interface ChecksumCatalogEntry {
   id: ChecksumAlgo
+  /** 下拉主标题（含端序中文，避免只写 LE/BE） */
   name: string
   size: 0 | 1 | 2
   /** 追加到帧尾时的默认字节序 */
   defaultEndian: 'le' | 'be' | 'na'
+  /** 副说明：线序示例等 */
+  hint?: string
 }
 
 /** UI / 帧配置下拉同源 */
 export const CHECKSUM_CATALOG: ChecksumCatalogEntry[] = [
   { id: 'none', name: '无', size: 0, defaultEndian: 'na' },
-  { id: 'sum8', name: '累加和 8 位', size: 1, defaultEndian: 'na' },
-  { id: 'sum16_le', name: '累加和 16 位（LE）', size: 2, defaultEndian: 'le' },
-  { id: 'sum16_be', name: '累加和 16 位（BE）', size: 2, defaultEndian: 'be' },
-  { id: 'xor8', name: '异或 8 位', size: 1, defaultEndian: 'na' },
-  { id: 'crc8_07', name: 'CRC8（poly 0x07）', size: 1, defaultEndian: 'na' },
-  { id: 'crc8_31', name: 'CRC8（poly 0x31）', size: 1, defaultEndian: 'na' },
-  { id: 'crc16_modbus', name: 'CRC16-Modbus（poly A001）', size: 2, defaultEndian: 'le' },
-  { id: 'crc16_ccitt_false', name: 'CRC16-CCITT-FALSE（poly 1021）', size: 2, defaultEndian: 'be' },
-  { id: 'crc16_ibm', name: 'CRC16-IBM/ANSI（poly 8005）', size: 2, defaultEndian: 'le' },
+  { id: 'sum8', name: '累加和 8 位', size: 1, defaultEndian: 'na', hint: '单字节，无端序' },
+  {
+    id: 'sum16_le',
+    name: '累加和 16 位 · 小端（低字节在前）',
+    size: 2,
+    defaultEndian: 'le',
+    hint: '例：校验值 0x1234 → 追加 34 12',
+  },
+  {
+    id: 'sum16_be',
+    name: '累加和 16 位 · 大端（高字节在前）',
+    size: 2,
+    defaultEndian: 'be',
+    hint: '例：校验值 0x1234 → 追加 12 34',
+  },
+  { id: 'xor8', name: '异或 8 位', size: 1, defaultEndian: 'na', hint: '单字节，无端序' },
+  { id: 'crc8_07', name: 'CRC8（多项式 0x07）', size: 1, defaultEndian: 'na', hint: '单字节，无端序' },
+  { id: 'crc8_31', name: 'CRC8（多项式 0x31）', size: 1, defaultEndian: 'na', hint: '单字节，无端序' },
+  {
+    id: 'crc16_modbus',
+    name: 'CRC16-Modbus · 默认小端',
+    size: 2,
+    defaultEndian: 'le',
+    hint: '常用线序低字节在前；可在发送/规则中改写端序',
+  },
+  {
+    id: 'crc16_ccitt_false',
+    name: 'CRC16-CCITT-FALSE · 默认大端',
+    size: 2,
+    defaultEndian: 'be',
+    hint: '常用线序高字节在前；可在发送/规则中改写端序',
+  },
+  {
+    id: 'crc16_ibm',
+    name: 'CRC16-IBM/ANSI · 默认小端',
+    size: 2,
+    defaultEndian: 'le',
+    hint: '常用线序低字节在前；可在发送/规则中改写端序',
+  },
 ]
 
 export function checksumSize(algo: ChecksumAlgo): 0 | 1 | 2 {

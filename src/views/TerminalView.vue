@@ -76,10 +76,20 @@
     <div class="send-opts">
       <a-space wrap size="small">
         <span class="opt-label">追加校验</span>
-        <a-select v-model:value="checksum" style="width: 200px" size="small">
-          <a-select-option v-for="c in CHECKSUM_CATALOG" :key="c.id" :value="c.id">{{ c.name }}</a-select-option>
+        <a-select v-model:value="checksum" style="width: 260px" size="small" @change="onChecksumAlgoChange">
+          <a-select-option v-for="c in CHECKSUM_CATALOG" :key="c.id" :value="c.id">
+            {{ c.name }}
+          </a-select-option>
         </a-select>
         <template v-if="checksum !== 'none'">
+          <template v-if="checksumNeedsEndian(checksum)">
+            <span class="opt-label">写入端序</span>
+            <a-select v-model:value="checksumEndian" style="width: 140px" size="small" @change="onChecksumEndianChange">
+              <a-select-option v-for="o in ENDIAN_OPTIONS" :key="o.value" :value="o.value">
+                {{ o.label }}
+              </a-select-option>
+            </a-select>
+          </template>
           <span class="opt-label">覆盖起</span>
           <a-input-number v-model:value="coverStart" :min="0" size="small" style="width: 70px" />
           <a-select v-model:value="coverEndMode" style="width: 130px" size="small">
@@ -94,6 +104,7 @@
             size="small"
             style="width: 70px"
           />
+          <span class="opt-hint muted">{{ checksumEndianHint }}</span>
         </template>
         <span v-else class="opt-hint muted">选算法后按覆盖区间计算并追加到帧尾（仅 HEX）</span>
       </a-space>
@@ -159,6 +170,14 @@ import {
   revealPath,
 } from '@/utils/diskLog'
 import { CHECKSUM_CATALOG, type ChecksumAlgo } from '@/protocol/checksum'
+import {
+  ENDIAN_OPTIONS,
+  applyEndianToChecksumAlgo,
+  checksumNeedsEndian,
+  defaultEndianForChecksum,
+  endianHint,
+  type Endian,
+} from '@/protocol/endianLabels'
 import { TX_VAR_CATALOG } from '@/protocol/txVars'
 import {
   normalizeHexInput,
@@ -187,9 +206,26 @@ const realtimeOn = ref(false)
 const realtimePath = ref('')
 const showVars = ref(false)
 const checksum = ref<ChecksumAlgo>('none')
+const checksumEndian = ref<Endian>('le')
 const coverStart = ref(0)
 const coverEndMode = ref<CoverEndMode>('to_end')
 const coverEndValue = ref(0)
+
+const checksumEndianHint = computed(() => {
+  if (checksum.value === 'none') return ''
+  const cat = CHECKSUM_CATALOG.find(c => c.id === checksum.value)
+  if (!checksumNeedsEndian(checksum.value)) return cat?.hint || '单字节校验，无端序'
+  return `${endianHint(checksumEndian.value)}${cat?.hint ? ` · ${cat.hint}` : ''}`
+})
+
+function onChecksumAlgoChange() {
+  checksumEndian.value = defaultEndianForChecksum(checksum.value)
+  checksum.value = applyEndianToChecksumAlgo(checksum.value, checksumEndian.value)
+}
+
+function onChecksumEndianChange() {
+  checksum.value = applyEndianToChecksumAlgo(checksum.value, checksumEndian.value)
+}
 
 const history = ref<string[]>([])
 const historyIdx = ref(-1)
@@ -234,6 +270,7 @@ function pipelineInput() {
       endMode: coverEndMode.value,
       endValue: coverEndValue.value,
     },
+    checksumEndian: checksumNeedsEndian(checksum.value) ? checksumEndian.value : undefined,
   }
 }
 

@@ -72,6 +72,8 @@ export interface SendPipelineInput {
   /** 仅 HEX 路径追加校验；文本模式忽略 */
   checksum?: ChecksumAlgo
   cover?: ChecksumCover
+  /** 16 位校验写入线序；缺省用算法目录默认 */
+  checksumEndian?: 'le' | 'be'
 }
 
 export interface SendPipelineResult {
@@ -103,7 +105,7 @@ export function runSendPipeline(input: SendPipelineInput): SendPipelineResult {
   let bytes = hexToBytes(expanded.payload)
   const algo = input.checksum || 'none'
   if (algo !== 'none') {
-    bytes = appendChecksumWithCover(bytes, algo, input.cover)
+    bytes = appendChecksumWithCover(bytes, algo, input.cover, input.checksumEndian)
   }
   const wire = bytesToHex(bytes)
   return {

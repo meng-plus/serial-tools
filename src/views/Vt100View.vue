@@ -3,6 +3,7 @@
     <div class="toolbar">
       <a-space wrap>
         <a-checkbox v-model:checked="localEcho">本地回显</a-checkbox>
+        <a-checkbox v-model:checked="autoWrap">自动换行</a-checkbox>
         <a-input-number
           v-model:value="fontSize"
           :min="10"
@@ -41,6 +42,8 @@ const workspace = useWorkspaceStore()
 const rootRef = ref<HTMLElement | null>(null)
 const hostRef = ref<HTMLElement | null>(null)
 const localEcho = ref(true)
+/** VT100 DECAWM：到行末是否自动换到下一行（关则末列覆盖） */
+const autoWrap = ref(true)
 
 let term: Terminal | null = null
 let fit: FitAddon | null = null
@@ -90,9 +93,15 @@ function applyFont() {
   persistConfig()
 }
 
+function applyAutoWrap() {
+  // DECSET/DECRST 7 — Auto Wrap Mode
+  term?.write(autoWrap.value ? '\x1b[?7h' : '\x1b[?7l')
+}
+
 function persistConfig() {
   workspace.updateViewConfig(props.channelId, props.viewId, {
     localEcho: localEcho.value,
+    autoWrap: autoWrap.value,
     fontSize: fontSize.value,
   })
 }
@@ -144,12 +153,17 @@ function loadConfig() {
   const v = views.find(x => x.id === props.viewId)
   const cfg = v?.config || {}
   if (typeof cfg.localEcho === 'boolean') localEcho.value = cfg.localEcho
+  if (typeof cfg.autoWrap === 'boolean') autoWrap.value = cfg.autoWrap
   if (typeof cfg.fontSize === 'number') {
     setFontSize(cfg.fontSize)
   }
 }
 
 watch(localEcho, persistConfig)
+watch(autoWrap, () => {
+  applyAutoWrap()
+  persistConfig()
+})
 
 onMounted(async () => {
   await hub.init()
@@ -174,6 +188,7 @@ onMounted(async () => {
   term.loadAddon(fit)
   term.open(hostRef.value)
   fit.fit()
+  applyAutoWrap()
   term.focus()
 
   term.attachCustomKeyEventHandler((ev) => {
