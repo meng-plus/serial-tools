@@ -10,7 +10,7 @@ version = "0.1.0"
 edition = "2021"
 authors = ["mengplus <chengmeng_2@outlook.com>"]
 license = "MIT"
-repository = "https://gitea.mengplus.top/mengplus/serial-tools.git"
+repository = "https://github.com/meng-plus/serial-tools.git"
 
 [workspace.dependencies]
 tokio = { version = "1", features = ["full"] }
@@ -26,6 +26,7 @@ hex = "0.4"
 serialport = "4"
 bytes = "1"
 uuid = { version = "1", features = ["v4"] }
+ureq = { version = "2.10", features = ["native-tls"] }
 
 transport = { path = "crates/transport" }
 

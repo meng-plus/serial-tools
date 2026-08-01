@@ -1,7 +1,7 @@
 # CI/CD 设计说明（与 workflows 同目录）
 
 > 调整流水线前请先读本文，避免偏离分层门禁与产物约定。  
-> 宿主：**GitHub Actions**（`github` 远端）。Gitea `origin` 为镜像仓，不强制双跑 CI。
+> 宿主：**GitHub Actions**（`origin` 远端，github.com/meng-plus/serial-tools）。Gitea 为只读镜像，不跑 CI。
 
 ## 目标
 
@@ -18,7 +18,7 @@
 
 ### CI（`ci.yml`）
 
-- `pull_request`：`opened` / `synchronize` / `reopened` / `ready_for_review`，目标分支 `main`（仅 GitHub PR；Gitea PR 不跑）
+- `pull_request`：`opened` / `synchronize` / `reopened` / `ready_for_review`，目标分支 `main`
 - `push`：`main`
 - **`paths-ignore`**：`docs/**`、`**/*.md`、`LICENSE*`、`.mimocode/**`  
   - 纯文档变更：整次 workflow 跳过（不占分钟）  
@@ -112,7 +112,7 @@ serial-tools-{VERSION}-{OS}-{ARCH}[-setup|-portable].{EXT}
 
 ## 明确不做（本期）
 
-- macOS / 代码签名 / Docker CI / Gitea Actions 镜像流水线
+- macOS / 代码签名 / Docker CI / 镜像站流水线
 - PR 上打安装包、main nightly 包
 - 应用内 Tauri updater
 
@@ -133,7 +133,7 @@ serial-tools-{VERSION}-{OS}-{ARCH}[-setup|-portable].{EXT}
 
 ```bash
 git tag v0.1.0
-git push github v0.1.0
+git push origin v0.1.0
 ```
 
 **手动：** GitHub → Actions → Release → Run workflow → 填 `version`（可选 `notes`）→ 选择分支（通常 `main`）。

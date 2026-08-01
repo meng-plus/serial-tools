@@ -49,19 +49,66 @@
         </div>
         <div class="license-line">MIT · Copyright © 2026 mengplus</div>
       </div>
+
+      <a-divider class="section-divider" />
+
+      <div class="about-actions">
+        <a-button :loading="checking" @click="handleCheckUpdate">
+          <template #icon><SyncOutlined /></template>
+          检查更新
+        </a-button>
+        <a-button @click="openIssues(true)">
+          <template #icon><BugOutlined /></template>
+          报告问题
+        </a-button>
+        <a-button @click="openIssues(false)">
+          <template #icon><BulbOutlined /></template>
+          提交需求
+        </a-button>
+        <a-button @click="openProject">
+          <template #icon><GithubOutlined /></template>
+          版本发布页
+        </a-button>
+      </div>
+      <div class="about-actions-tip">
+        新版与工单均在 GitHub 发布与跟踪，点此前往：
+        <a href="#" @click.prevent="openProject">github.com/meng-plus/serial-tools</a>
+      </div>
     </a-card>
+
+    <a-modal
+      v-model:open="updateModal.open"
+      :title="updateModal.release ? `发现新版本 ${updateModal.release.tag_name}` : '检查更新'"
+      ok-text="前往下载"
+      cancel-text="取消"
+      @ok="goDownload"
+    >
+      <p v-if="updateModal.release" class="update-meta">
+        当前版本 {{ APP_VERSION_LABEL }}，最新版发布于 {{ releaseDate(updateModal.release.published_at) }}
+      </p>
+      <pre v-if="updateModal.release?.body" class="update-body">{{ updateModal.release.body }}</pre>
+      <p v-else class="update-meta">可在版本发布页查看更新详情。</p>
+    </a-modal>
   </div>
 </template>
 
 <script setup lang="ts">
+import { ref, reactive } from 'vue'
 import {
   UserOutlined, MailOutlined, TeamOutlined,
   SwapOutlined, CodeOutlined, FileTextOutlined, BugOutlined,
-  HddOutlined,
+  HddOutlined, GithubOutlined, BulbOutlined, SyncOutlined,
 } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 import { isTauri } from '@/api/tauri'
 import { APP_VERSION_LABEL, APP_GIT_HASH_SHORT, APP_BUILD_DATE } from '@/buildInfo'
+import {
+  GITHUB_ISSUES_URL,
+  GITHUB_RELEASES_URL,
+  checkForUpdate,
+  openExternal,
+  type GitHubRelease,
+} from '@/utils/updater'
 
 const QQ_GROUP = '790012859'
 /** QQ 客户端加群协议（无邀请码时尽力打开群资料） */
@@ -80,6 +127,58 @@ const features = [
 const techStack = [
   'Rust', 'Tauri v2', 'Vue 3', 'TypeScript', 'Pinia', 'Ant Design Vue', 'tokio', 'serialport',
 ]
+
+// ── 更新检查 & 问题反馈 ──────────────────────────────────────
+
+const checking = ref(false)
+const updateModal = reactive<{
+  open: boolean
+  release: GitHubRelease | null
+}>({
+  open: false,
+  release: null,
+})
+
+async function handleCheckUpdate() {
+  if (checking.value) return
+  checking.value = true
+  try {
+    const result = await checkForUpdate(APP_VERSION_LABEL)
+    if (result.hasUpdate && result.latest) {
+      updateModal.release = result.latest
+      updateModal.open = true
+    } else if (result.error) {
+      message.warning(`检查更新失败：${result.error}，可前往 GitHub 查看最新版本`)
+    } else {
+      message.success(`当前已是最新版本 ${APP_VERSION_LABEL}`)
+    }
+  } finally {
+    checking.value = false
+  }
+}
+
+function goDownload() {
+  updateModal.open = false
+  if (updateModal.release?.html_url) {
+    openExternal(updateModal.release.html_url)
+  } else {
+    openExternal(GITHUB_RELEASES_URL)
+  }
+}
+
+function releaseDate(iso: string | undefined): string {
+  if (!iso) return '未知'
+  return new Date(iso).toLocaleDateString()
+}
+
+async function openIssues(isBug: boolean) {
+  const title = isBug ? '[Bug] ' : '[Feature] '
+  await openExternal(`${GITHUB_ISSUES_URL}/new?title=${encodeURIComponent(title)}`)
+}
+
+function openProject() {
+  openExternal(GITHUB_RELEASES_URL)
+}
 
 async function copyGroupId() {
   try {
@@ -214,5 +313,34 @@ async function joinQqGroup() {
 .license-line {
   font-size: 13px;
   color: rgba(0, 0, 0, 0.45);
+}
+.about-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.about-actions-tip {
+  margin-top: 12px;
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.45);
+}
+.about-actions-tip a {
+  color: #1677ff;
+}
+.update-meta {
+  margin: 0 0 12px;
+  color: rgba(0, 0, 0, 0.65);
+}
+.update-body {
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 13px;
+  line-height: 1.6;
+  background: rgba(0, 0, 0, 0.03);
+  border-radius: 8px;
+  padding: 12px;
+  margin: 0;
 }
 </style>

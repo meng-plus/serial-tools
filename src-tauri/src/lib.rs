@@ -61,6 +61,8 @@ pub fn run() {
             // 协议解析
             commands::protocol::get_parsed_results,
             commands::protocol::clear_parsed,
+            // 更新检查
+            commands::updater::check_for_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
