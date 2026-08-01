@@ -1,6 +1,6 @@
 # Serial Tools 设计决策
 
-> 基于实际代码，2026-07-31 更新
+> 基于实际代码，2026-08-02 更新
 
 ## 1. 选择 Tauri v2 而非 Electron
 
@@ -20,6 +20,8 @@
 - 项目初期，拆分过早增加维护成本
 - transport crate 独立后可复用
 - 后续如需 framing/channel/protocol，再拆分不迟
+
+**当前状态**: AppState 内部的领域状态已以 **模块** 形式拆分（`domain/packet_store` · `bus_registry` · `channel_manager` · `log_source`），收敛字段与操作；拆成独立 crate 仍延后，待接口稳定。
 
 **未来计划**: 随功能增长，可拆分为 `transport` / `channel` / `framing` / `protocol` 等独立 crate。
 
@@ -55,19 +57,20 @@
 - 无需轮询：数据到达立即推送
 - 有 lagged 处理：慢消费者自动跳过旧数据
 
-**实现**: `AppState.rx_broadcast: broadcast::Sender<RxBroadcastEvent>`，读线程发送，前端和转发器订阅。
+**实现**: `PacketStore`（`domain/packet_store.rs`）持有 `rx_broadcast` + 缓冲 + 单调序号，读线程 `push_rx` 一步完成（分配 seq → 入缓冲 → 广播），前端与转发器订阅。
 
-## 6. AppState 统一管理
+## 6. AppState 统一管理 + 领域服务模块
 
-**决策**: 所有通道、转发器、数据包缓冲集中在 `AppState`。
+**决策**: 所有通道、转发器、数据包缓冲集中在 `AppState`，按职责拆为领域服务模块（`domain/`）。
 
 **理由**:
 - Tauri `State<AppState>` 注入到每个 command，访问方便
-- `RwLock<HashMap>` 支持并发读写
+- 通道注册表（ChannelManager）、总线（BusRegistry）、数据包缓冲（PacketStore）各自收敛操作，`AppState` 只做组合
 - 数据包缓冲有上限（10000 条），防止内存无限增长
 
 **替代方案（已排除）**:
 - 每个通道独立管理：分散状态，转发器需要跨通道访问
+- 立即拆独立 crate：接口未稳定，模块化已满足收敛目标
 
 ## 7. RS485 不做软件方向控制
 
@@ -218,3 +221,21 @@ BusSubscription { channel_id, direction: RxToBus | TxFromBus | Both }
 - **不做**完整 Modbus 主站/从站产品化
 
 **详情**: [protocol-multi-view/DESIGN_protocol-multi-view.md](./protocol-multi-view/DESIGN_protocol-multi-view.md)
+
+## 20. 命令错误契约：结构化 `{code, message}`
+
+**决策**: `CommandError` 统一序列化为 `{ code, message }`（中文），前端 `parseCommandError` / `errorMessage` 集中解析；`Message` 弹窗变体 `code = "internal"`，其余视为非致命（`noError`）。
+
+**理由**:
+- 告别 `String(e)` 的「Command failed: …」前缀，前端只认后端中文消息
+- 错误分类稳定（`code`）可做后续自动重试 / 分级展示
+
+## 21. 日志来源枚举（LogSource）
+
+**决策**: `domain/log_source.rs` 定义 `LogSource` 枚举（connection / bus / tcp_server / reader / config / system / recording / test），`AppState::log` 只接受枚举。
+
+**理由**: 消除散落魔法字符串；序列化仍 `as_str()` 保持 snake_case，前端 `LogEntry.source: string` 零改动、契约不变。
+
+## 22. 版本更新检查
+
+**决策**: About 页提供「检查更新」：`checkForUpdate` 走 GitHub Releases API，`parseVersion` / `compareVersions` 为纯函数；打开外部链接经 Tauri shell（浏览器预览回退 `window.open`）。版本标识由构建期注入（`__APP_VERSION__` 等），发布流水线统一改写 package.json / tauri.conf.json。

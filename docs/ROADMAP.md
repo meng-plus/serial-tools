@@ -1,6 +1,6 @@
 # Serial Tools 路线图
 
-> 2026-07-31 · 基础通信链路已可用后的优先序
+> 2026-08-02 · 基础通信链路已可用后的优先序
 
 ## 近期已完成（基线）
 
@@ -46,7 +46,8 @@
 
 ### P3 — 结构演进（勿抢跑）
 
-- ChannelManager / ProtocolChannel crate
+- ✅ 领域状态内部模块化（`domain/packet_store` · `bus_registry` · `channel_manager` · `log_source`）
+- 独立 ChannelManager / ProtocolChannel crate（待接口稳定后拆）
 - Framer 接入后端协议解析管线
 - RS485 软件收发互斥
 
@@ -54,6 +55,7 @@
 
 | 项 | 原因 |
 |----|------|
-| 独立 ChannelManager crate | DESIGN：稳定后再拆 |
+| 独立 ChannelManager crate | DESIGN：内部模块已落地，稳定后再拆 |
 | 完整 MQTT / UDP | 无刚需前不占排期 |
 | async Transport 整仓重写 | 与现 sync+thread 决策冲突 |
+| 浏览器 E2E（WebdriverIO+tauri-driver） | 环境成本高，暂以 `cargo test` 集成测试 + `npm test` 覆盖 |

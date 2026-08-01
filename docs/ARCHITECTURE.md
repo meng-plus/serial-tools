@@ -1,6 +1,6 @@
 # Serial Tools 架构文档
 
-> 基于实际代码校对，2026-07-31（v0.1.0 基线）
+> 基于实际代码校对，2026-08-02（v0.1.0 基线 + S1–S5 规范化）
 > 配套：[DESIGN-DECISIONS.md](./DESIGN-DECISIONS.md) · [ROADMAP.md](./ROADMAP.md) · [COMMUNICATION-ARCH-REFINEMENT.md](./COMMUNICATION-ARCH-REFINEMENT.md)
 
 ## 0. 能力基线（已实现 / 计划中）
@@ -42,9 +42,10 @@
 ┌──────────────────────┴───────────────────────────────────┐
 │                 后端 (Rust + Tauri v2)                    │
 │  Commands: connection · data · forward · protocol · …    │
-│  AppState: channels · tcp_servers · buses · packets      │
-│            rx_broadcast · log_broadcast · packet_seq     │
-│  event_bridge: rx_broadcast → emit("rx-data")            │
+│  AppState: channels(ChannelManager) · buses(BusRegistry) │
+│            packets(PacketStore) · recordings · log 事件   │
+│  domain/: packet_store · bus_registry · channel_manager  │
+│  event_bridge: packets→emit("rx-data")                   │
 │                log_broadcast → emit("log-entry")         │
 │  Transport: Serial │ TCP Client │ TCP Server │ MQTT stub │
 └──────────────────────────────────────────────────────────┘
@@ -54,15 +55,13 @@
 
 ```
 spawn_reader / Server 子通道读线程
-  → PacketEntry{seq} 入 packets
-  → rx_broadcast.send(RxBroadcastEvent{seq})
-       ├─ event_bridge → 前端 terminalStore（主路径）
+  → packets.push_rx（PacketStore 一步完成：分配 seq → 入缓冲 → rx_broadcast.send）
+       ├─ event_bridge → 前端 rxHub（主路径）
        └─ DataBus RxToBus → bus_tx → TxFromBus → write
 
 send_data
   → Transport.write
-  → PacketEntry{seq} 入 packets
-  → 回包给前端入账 TX（不再依赖轮询）
+  → packets.push_tx（回包给前端入账 TX，不再依赖轮询）
 ```
 
 ---
@@ -72,15 +71,17 @@ send_data
 ```
 serial-tools/
 ├── crates/transport/     # 唯一独立业务 crate
-│   └── serial / tcp/{client,server} / mqtt(stub) / mock / framer(未接线)
+│   └── serial / tcp/{client,server} / mqtt(stub) / mock / framer(已接入 serial)
 ├── src-tauri/src/
-│   ├── state.rs · channel_lifecycle · tcp_server_monitor · …
-│   └── commands/
+│   ├── state.rs · channel_lifecycle · tcp_server_monitor · recording · error
+│   ├── domain/           # packet_store · bus_registry · channel_manager · log_source
+│   └── commands/         # connection · data · forward · recording · config · log · …
 ├── src/                  # Vue
-│   ├── pages/            # Connection · ChannelWorkspace · …
+│   ├── pages/            # Connection · ChannelWorkspace · About · …
 │   ├── views/            # TerminalView · ParsedLogView · MonitorView（单通道）
 │   ├── protocol/         # 前端解析引擎（regex/json）
 │   ├── stores/           # rxHub · protocol · valueBus · workspace · …
+│   └── utils/            # error · recording · updater · diskLog · …
 └── docs/
     └── protocol-multi-view/  # 协议+多视图设计
 ```
@@ -130,7 +131,7 @@ connect
   → emit_connected
 
 register_server_client
-  → client_parents + register_channel → spawn_reader
+  → channels.register_server_client（含 client_parents 表） → spawn_reader
 
 remove_channel → cancel → shutdown → join 读线程(≤2s)
 
@@ -150,7 +151,7 @@ remove_channel → cancel → shutdown → join 读线程(≤2s)
 
 | 事件 | 消费者 | 说明 |
 |------|--------|------|
-| `rx-data` | terminalStore | 主路径；含 `seq` |
+| `rx-data` | rxHub | 主路径；含 `seq`，去重后扇出各视图 |
 | `connection-changed` | connectionStore | 含 `reason` / `server_clients` |
 | `log-entry` | logStore | |
 
@@ -213,3 +214,11 @@ GB2312：UI 已移除；后端若收到 `gb2312` 按 GBK 兼容处理。
 | ROADMAP.md | 下一步优先级 |
 | requirements.md | 需求（含计划项） |
 | tcp-server-bus-fix/* | 已完成专项验收 |
+
+## 11. 错误契约与可观测性
+
+- **命令错误契约**：`CommandError` 序列化为 `{ code, message }`；前端 `parseCommandError` / `errorMessage` 统一取后端中文消息（`Message` 弹窗用 `code !== 'internal'` 判断是否吞错）。后端经 `From<TransportError>` + `fatal_kind()` 把 IO 错误分类（WSAECONNRESET=10054 等映射为连接错误）。
+- **日志来源**：`LogSource` 枚举（`domain/log_source.rs`）收敛来源魔法字符串，序列化保持 snake_case 契约，前端无需感知。
+- **通道数据录制**：`recording.rs`（RecordingRegistry）start/stop/list/remove；读线程录 RX、`send_data` 录 TX；CSV 真实 channel_id，文件名 sanitize。
+
+---
