@@ -18,6 +18,28 @@ export default defineConfig({
     __APP_BUILD_DATE__: JSON.stringify(buildInfo.buildDate),
   },
   clearScreen: false,
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return
+          if (id.includes('ant-design-vue') || id.includes('@ant-design/icons-vue')) {
+            return 'antd'
+          }
+          if (id.includes('echarts') || id.includes('vue-echarts')) {
+            return 'echarts'
+          }
+          if (id.includes('@xterm')) {
+            return 'xterm'
+          }
+          if (id.includes('/vue/') || id.includes('vue-router') || id.includes('pinia')) {
+            return 'vue-vendor'
+          }
+          return 'vendor'
+        },
+      },
+    },
+  },
   server: {
     port: 1420,
     strictPort: true,
