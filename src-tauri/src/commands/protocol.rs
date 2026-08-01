@@ -34,9 +34,7 @@ pub async fn get_parsed_results(
 }
 
 #[tauri::command]
-pub async fn clear_parsed(
-    state: State<'_, AppState>,
-) -> Result<bool, String> {
+pub async fn clear_parsed(state: State<'_, AppState>) -> Result<bool, String> {
     let _ = &state;
     Ok(true)
 }

@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { invoke } from '@/api'
-import { onRxData, type RxEventPayload } from '@/api/events'
+import { onRxData, onRxGap, type RxEventPayload } from '@/api/events'
 import type { RxRecord } from '@/protocol/types'
 
 type Listener = (record: RxRecord) => void
@@ -40,6 +40,7 @@ export const useRxHub = defineStore('rxHub', () => {
   const listeners = new Set<Listener>()
 
   let unlisten: (() => void) | null = null
+  let unlistenGap: (() => void) | null = null
   let pollTimer: ReturnType<typeof setInterval> | null = null
   let initPromise: Promise<void> | null = null
 
@@ -157,6 +158,10 @@ export const useRxHub = defineStore('rxHub', () => {
           })
         })
         eventDriven.value = true
+        // 桥接层丢帧（broadcast lagged）时补拉后端缓冲；seq/contentKey 去重保证幂等
+        unlistenGap = await onRxGap(() => {
+          void loadHistory(2000)
+        })
       } catch (e) {
         console.warn('[rxHub] onRxData failed, fallback to polling', e)
         eventDriven.value = false
@@ -173,6 +178,8 @@ export const useRxHub = defineStore('rxHub', () => {
   function dispose() {
     unlisten?.()
     unlisten = null
+    unlistenGap?.()
+    unlistenGap = null
     eventDriven.value = false
     stopPolling()
   }

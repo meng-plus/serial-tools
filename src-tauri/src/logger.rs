@@ -101,7 +101,13 @@ impl DataLogger {
         self.running = false;
     }
 
-    fn write_data(format: &LogFormat, file: &mut File, data: &[u8], timestamp: &str, direction: &str) {
+    fn write_data(
+        format: &LogFormat,
+        file: &mut File,
+        data: &[u8],
+        timestamp: &str,
+        direction: &str,
+    ) {
         match format {
             LogFormat::Bin => {
                 let _ = file.write_all(data);

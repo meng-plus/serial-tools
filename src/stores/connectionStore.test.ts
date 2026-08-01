@@ -8,6 +8,7 @@ vi.mock('@/api/tauri', () => ({
 vi.mock('@/api/events', () => ({
   onConnectionChanged: vi.fn(() => Promise.resolve(() => {})),
   onRxData: vi.fn(() => Promise.resolve(() => {})),
+  onRxGap: vi.fn(() => Promise.resolve(() => {})),
   onLogEntry: vi.fn(() => Promise.resolve(() => {})),
 }))
 

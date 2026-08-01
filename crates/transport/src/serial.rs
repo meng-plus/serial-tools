@@ -40,10 +40,13 @@ impl SerialTransport {
     pub fn list_ports() -> Vec<PortInfo> {
         serialport::available_ports()
             .map(|ports| {
-                ports.into_iter().map(|p| PortInfo {
-                    name: p.port_name,
-                    description: format!("{:?}", p.port_type),
-                }).collect()
+                ports
+                    .into_iter()
+                    .map(|p| PortInfo {
+                        name: p.port_name,
+                        description: format!("{:?}", p.port_type),
+                    })
+                    .collect()
             })
             .unwrap_or_default()
     }
@@ -100,14 +103,17 @@ impl Transport for SerialTransport {
             let deadline = Instant::now() + Duration::from_millis(100);
             while self.receiving.load(Ordering::Acquire) {
                 if Instant::now() >= deadline {
-                    return Err(TransportError::Send("RS485 半双工: 读取中无法发送，超时".to_string()));
+                    return Err(TransportError::Send(
+                        "RS485 半双工: 读取中无法发送，超时".to_string(),
+                    ));
                 }
                 std::thread::sleep(Duration::from_millis(1));
             }
         }
         let mut guard = self.port.lock().unwrap();
         let port = guard.as_mut().ok_or(TransportError::NotConnected)?;
-        port.write(bytes).map_err(|e| TransportError::Send(e.to_string()))
+        port.write(bytes)
+            .map_err(|e| TransportError::Send(e.to_string()))
     }
 
     fn read(&self, buf: &mut [u8]) -> Result<usize, TransportError> {
@@ -117,7 +123,8 @@ impl Transport for SerialTransport {
         let result = {
             let mut guard = self.port.lock().unwrap();
             let port = guard.as_mut().ok_or(TransportError::NotConnected)?;
-            port.read(buf).map_err(|e| TransportError::Receive(e.to_string()))
+            port.read(buf)
+                .map_err(|e| TransportError::Receive(e.to_string()))
         };
         if self.config.half_duplex {
             self.receiving.store(false, Ordering::Release);

@@ -70,6 +70,12 @@ jobs:
       - name: Check transport crate
         run: cargo check -p transport
 
+      - name: Clippy transport
+        run: cargo clippy -p transport -- -D warnings
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
   tauri-backend:
     name: L3 tauri-backend
     runs-on: ubuntu-latest
@@ -106,6 +112,9 @@ jobs:
 
       - name: Check workspace
         run: cargo check --workspace
+
+      - name: Clippy workspace
+        run: cargo clippy --workspace -- -D warnings
 
   ci-ok:
     name: CI OK

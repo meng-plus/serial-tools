@@ -60,7 +60,10 @@ pub async fn write_export_file(filename: String, content: String) -> Result<Stri
 
 /// 创建 channel-logs/ 下日志文件（可带初始内容），返回绝对路径
 #[tauri::command]
-pub async fn create_channel_log_file(filename: String, header: Option<String>) -> Result<String, String> {
+pub async fn create_channel_log_file(
+    filename: String,
+    header: Option<String>,
+) -> Result<String, String> {
     let dir = data_root().join("channel-logs");
     ensure_dir(&dir)?;
     let path = dir.join(sanitize_filename(&filename));
@@ -95,9 +98,7 @@ pub async fn append_channel_log(path: String, line: String) -> Result<(), String
 pub async fn reveal_in_folder(path: String) -> Result<(), String> {
     let p = PathBuf::from(&path);
     let target = if p.is_file() {
-        p.parent()
-            .map(|x| x.to_path_buf())
-            .unwrap_or(p)
+        p.parent().map(|x| x.to_path_buf()).unwrap_or(p)
     } else {
         p
     };

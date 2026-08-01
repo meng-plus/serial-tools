@@ -80,7 +80,9 @@ impl Transport for TcpClientTransport {
     fn write(&self, bytes: &[u8]) -> Result<usize, TransportError> {
         let mut guard = self.stream.lock().unwrap();
         let stream = guard.as_mut().ok_or(TransportError::NotConnected)?;
-        stream.write(bytes).map_err(|e| TransportError::Send(e.to_string()))
+        stream
+            .write(bytes)
+            .map_err(|e| TransportError::Send(e.to_string()))
     }
 
     fn read(&self, buf: &mut [u8]) -> Result<usize, TransportError> {
@@ -110,4 +112,3 @@ impl Transport for TcpClientTransport {
         &self.descriptor
     }
 }
-

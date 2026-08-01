@@ -19,10 +19,18 @@ pub struct RxEventPayload {
     pub seq: u64,
 }
 
+/// 桥接层丢帧后的补拉提示：前端应从此 seq 起补拉历史包
+#[derive(Clone, serde::Serialize)]
+pub struct RxGapPayload {
+    pub from_seq: u64,
+}
+
 /// 启动事件桥接：独立线程订阅 rx_broadcast，通过 Tauri emit 推送给前端
 pub fn start_event_bridge(app: AppHandle, rx_sender: broadcast::Sender<RxBroadcastEvent>) {
     std::thread::spawn(move || {
         let mut rx = rx_sender.subscribe();
+        // 最近一次成功 emit 的 seq；Lagged 时据此提示前端补拉
+        let mut last_seq: Option<u64> = None;
         loop {
             match rx.blocking_recv() {
                 Ok(event) => {
@@ -38,9 +46,17 @@ pub fn start_event_bridge(app: AppHandle, rx_sender: broadcast::Sender<RxBroadca
                     if let Err(e) = app.emit("rx-data", payload) {
                         eprintln!("[event_bridge] emit rx-data failed: {}", e);
                     }
+                    last_seq = Some(event.seq);
                 }
-                Err(broadcast::error::RecvError::Lagged(n)) => {
-                    eprintln!("[event_bridge] lagged, skipped {} events", n);
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    // 前端会永久缺一段 rx-data；seq 已单调递增，前端可凭 seq 去重补拉
+                    eprintln!("[event_bridge] lagged, asking frontend to backfill");
+                    let _ = app.emit(
+                        "rx-gap",
+                        RxGapPayload {
+                            from_seq: last_seq.map_or(1, |s| s + 1),
+                        },
+                    );
                 }
                 Err(broadcast::error::RecvError::Closed) => {
                     eprintln!("[event_bridge] rx_broadcast closed");

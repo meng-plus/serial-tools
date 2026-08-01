@@ -7,9 +7,12 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+/// 待读缓冲：对端地址 + 已收到的字节
+type PendingBytes = (SocketAddr, Vec<u8>);
+
 pub struct TcpServerTransport {
     clients: Arc<Mutex<HashMap<SocketAddr, TcpStream>>>,
-    pending: Arc<Mutex<Vec<(SocketAddr, Vec<u8>)>>>,
+    pending: Arc<Mutex<Vec<PendingBytes>>>,
     /// 新接受的客户端队列（供外部提取，创建独立通道）
     new_clients: Arc<Mutex<Vec<(SocketAddr, TcpStream)>>>,
     descriptor: TransportDescriptor,
@@ -72,24 +75,24 @@ impl TcpServerTransport {
     pub fn send_to_client(&self, addr: SocketAddr, bytes: &[u8]) -> Result<usize, TransportError> {
         let mut guard = self.clients.lock().unwrap();
         let stream = guard.get_mut(&addr).ok_or(TransportError::NotConnected)?;
-        stream.write(bytes).map_err(|e| TransportError::Send(e.to_string()))
+        stream
+            .write(bytes)
+            .map_err(|e| TransportError::Send(e.to_string()))
     }
 }
 
 impl Transport for TcpServerTransport {
     fn open(&mut self) -> Result<(), TransportError> {
         let addr = format!("{}:{}", self.bind_addr, self.port);
-        let listener = TcpListener::bind(&addr)
-            .map_err(|e| TransportError::Connect(e.to_string()))?;
+        let listener =
+            TcpListener::bind(&addr).map_err(|e| TransportError::Connect(e.to_string()))?;
         // 保存绑定端口（listener 即将被移走）
         let local_port = listener.local_addr().map(|a| a.port()).unwrap_or(0);
         *self.bound_port.lock().unwrap() = Some(local_port);
         // 更新 descriptor 地址
         self.descriptor.address = format!("{}:{}", self.bind_addr, local_port);
 
-        listener
-            .set_nonblocking(true)
-            .map_err(TransportError::Io)?;
+        listener.set_nonblocking(true).map_err(TransportError::Io)?;
 
         *self.running.lock().unwrap() = true;
         *self.listener.lock().unwrap() = Some(listener);
@@ -206,11 +209,15 @@ impl Transport for TcpServerTransport {
     }
 
     fn client_info(&self) -> Vec<String> {
-        self.clients.lock().unwrap().keys().map(|a| a.to_string()).collect()
+        self.clients
+            .lock()
+            .unwrap()
+            .keys()
+            .map(|a| a.to_string())
+            .collect()
     }
 }
 
 // ══════════════════════════════════════════════════════════════
 // 单元测试
 // ══════════════════════════════════════════════════════════════
-

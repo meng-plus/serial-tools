@@ -2,11 +2,11 @@
 //!
 //! 所有传输层(串口/TCP/MQTT)实现同一 trait，上层无需关心底层。
 
+pub mod framer;
+pub mod mock;
+pub mod mqtt;
 pub mod serial;
 pub mod tcp;
-pub mod mqtt;
-pub mod mock;
-pub mod framer;
 
 use thiserror::Error;
 
@@ -37,9 +37,9 @@ impl TransportError {
                 || lower.contains("强制关闭")
         }
         match self {
-            TransportError::Receive(msg) | TransportError::Send(msg) | TransportError::Connect(msg) => {
-                msg_is_fatal(msg)
-            }
+            TransportError::Receive(msg)
+            | TransportError::Send(msg)
+            | TransportError::Connect(msg) => msg_is_fatal(msg),
             TransportError::Io(e) => {
                 matches!(
                     e.kind(),
@@ -200,7 +200,10 @@ mod mock_tests {
         assert_eq!(mock.write(b"hello").unwrap(), 5);
         assert_eq!(mock.write(b"world123").unwrap(), 8);
         assert_eq!(mock.tx_bytes(), 13);
-        assert_eq!(mock.get_tx_log(), vec![b"hello".to_vec(), b"world123".to_vec()]);
+        assert_eq!(
+            mock.get_tx_log(),
+            vec![b"hello".to_vec(), b"world123".to_vec()]
+        );
     }
 
     #[test]
@@ -264,8 +267,8 @@ mod mock_tests {
 
 #[cfg(test)]
 mod tcp_tests {
-    use crate::{Transport};
     use crate::tcp::TcpClientTransport;
+    use crate::Transport;
 
     #[test]
     fn test_tcp_new() {
@@ -305,8 +308,8 @@ mod tcp_tests {
 
 #[cfg(test)]
 mod mqtt_tests {
-    use crate::{Transport};
     use crate::mqtt::MqttTransport;
+    use crate::Transport;
 
     #[test]
     fn test_mqtt_not_implemented() {
@@ -323,9 +326,9 @@ mod mqtt_tests {
 
 #[cfg(test)]
 mod duplex_tests {
-    use crate::{DuplexMode, Transport};
     use crate::serial::{SerialConfig, SerialTransport};
     use crate::tcp::TcpClientTransport;
+    use crate::{DuplexMode, Transport};
 
     #[test]
     fn test_duplex_default_full() {
@@ -354,13 +357,18 @@ mod config_tests {
     #[test]
     fn test_config_serial_roundtrip() {
         let config = TransportConfig::Serial {
-            port: "COM3".to_string(), baud_rate: 115200,
-            data_bits: 8, stop_bits: 1, parity: "None".to_string(),
+            port: "COM3".to_string(),
+            baud_rate: 115200,
+            data_bits: 8,
+            stop_bits: 1,
+            parity: "None".to_string(),
         };
         let json = serde_json::to_string(&config).unwrap();
         let back: TransportConfig = serde_json::from_str(&json).unwrap();
         match back {
-            TransportConfig::Serial { port, baud_rate, .. } => {
+            TransportConfig::Serial {
+                port, baud_rate, ..
+            } => {
                 assert_eq!(port, "COM3");
                 assert_eq!(baud_rate, 115200);
             }
@@ -370,7 +378,10 @@ mod config_tests {
 
     #[test]
     fn test_config_tcp_roundtrip() {
-        let config = TransportConfig::TcpClient { host: "10.0.0.1".to_string(), port: 5000 };
+        let config = TransportConfig::TcpClient {
+            host: "10.0.0.1".to_string(),
+            port: 5000,
+        };
         let json = serde_json::to_string(&config).unwrap();
         let back: TransportConfig = serde_json::from_str(&json).unwrap();
         match back {
@@ -390,10 +401,14 @@ mod fatal_disconnect_tests {
     #[test]
     fn test_connection_reset_is_fatal() {
         assert!(TransportError::Receive("Connection reset by peer".into()).is_fatal_disconnect());
-        assert!(TransportError::Io(std::io::Error::from(std::io::ErrorKind::ConnectionReset))
-            .is_fatal_disconnect());
-        assert!(TransportError::Receive("An existing connection was forcibly closed".into())
-            .is_fatal_disconnect());
+        assert!(
+            TransportError::Io(std::io::Error::from(std::io::ErrorKind::ConnectionReset))
+                .is_fatal_disconnect()
+        );
+        assert!(
+            TransportError::Receive("An existing connection was forcibly closed".into())
+                .is_fatal_disconnect()
+        );
     }
 
     #[test]

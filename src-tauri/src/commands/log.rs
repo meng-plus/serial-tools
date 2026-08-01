@@ -32,9 +32,7 @@ pub async fn get_logs(
 }
 
 #[tauri::command]
-pub async fn clear_logs(
-    state: State<'_, AppState>,
-) -> Result<bool, String> {
+pub async fn clear_logs(state: State<'_, AppState>) -> Result<bool, String> {
     state.logs.lock().await.clear();
     Ok(true)
 }

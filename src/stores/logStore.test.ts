@@ -7,6 +7,7 @@ vi.mock('@/api/tauri', () => ({
 
 vi.mock('@/api/events', () => ({
   onLogEntry: vi.fn(() => Promise.resolve(() => {})),
+  onRxGap: vi.fn(() => Promise.resolve(() => {})),
 }))
 
 import { setActivePinia, createPinia } from 'pinia'

@@ -28,6 +28,11 @@ export interface LogEventPayload {
   message: string
 }
 
+/** 桥接层丢帧提示：前端应从 from_seq 起补拉历史包 */
+export interface RxGapPayload {
+  from_seq: number
+}
+
 type UnlistenFn = () => void
 
 let listenFn: typeof import('@tauri-apps/api/event').listen | null = null
@@ -57,4 +62,10 @@ export async function onLogEntry(handler: (payload: LogEventPayload) => void): P
   const listen = await getListen()
   if (!listen) return () => {}
   return listen<LogEventPayload>('log-entry', (event) => handler(event.payload))
+}
+
+export async function onRxGap(handler: (payload: RxGapPayload) => void): Promise<UnlistenFn> {
+  const listen = await getListen()
+  if (!listen) return () => {}
+  return listen<RxGapPayload>('rx-gap', (event) => handler(event.payload))
 }

@@ -16,7 +16,10 @@ impl MqttTransport {
             address: format!("{}:{}", broker, port),
             ..Default::default()
         };
-        Self { descriptor, active: false }
+        Self {
+            descriptor,
+            active: false,
+        }
     }
 }
 
