@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="workspace-page">
     <a-row :gutter="16">
       <a-col :span="14">
@@ -89,6 +89,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { errorMessage } from '@/utils/error'
 import { message } from 'ant-design-vue'
 import { invoke, isTauri } from '@/api'
 import {
@@ -159,7 +160,7 @@ async function handleLoadSession(name: string) {
     if (data.settings) applySettings(data.settings)
     message.success(`已加载会话「${name}」：${data.rules.length} 条规则（连接请手动建立）`)
   } catch (e: unknown) {
-    message.error(String(e))
+    message.error(errorMessage(e))
   }
 }
 
@@ -191,7 +192,7 @@ async function exportPackage(format: 'yaml' | 'json') {
     message.success(via === 'appdir' ? `已导出：${path}` : `已触发下载：${path}`)
     if (via === 'appdir') await revealPath(path)
   } catch (e: unknown) {
-    message.error(String(e))
+    message.error(errorMessage(e))
   }
 }
 
@@ -225,7 +226,7 @@ async function onImportFile(ev: Event) {
         (pkg.txLists.length && cid ? '，定时发送已应用' : ''),
     )
   } catch (e: unknown) {
-    message.error(String(e))
+    message.error(errorMessage(e))
   }
 }
 
@@ -238,7 +239,7 @@ async function openDataRoot() {
     const dirs = await invoke<{ root: string }>('get_data_dirs')
     await invoke('reveal_in_folder', { path: dirs.root })
   } catch (e: unknown) {
-    message.error(String(e))
+    message.error(errorMessage(e))
   }
 }
 

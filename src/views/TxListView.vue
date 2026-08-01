@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="tx-list-view">
     <div class="toolbar">
       <a-space wrap>
@@ -155,6 +155,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { errorMessage } from '@/utils/error'
 import { message } from 'ant-design-vue'
 import { useTerminalStore, useTxPlannerStore } from '@/stores'
 import { createDefaultTxItem, type TxListItem } from '@/workspace/schema'
@@ -276,7 +277,7 @@ async function sendOnce(itemId: string) {
   try {
     await sendItem(item)
   } catch (e: unknown) {
-    message.error(String(e))
+    message.error(errorMessage(e))
   }
 }
 

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div ref="rootRef" class="vt100-view" tabindex="0" @keydown="onRootKey">
     <div class="toolbar">
       <a-space wrap>
@@ -25,6 +25,7 @@
 
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { errorMessage } from '@/utils/error'
 import { message, Modal } from 'ant-design-vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -82,7 +83,7 @@ function sendRaw(data: string) {
     term.write(data)
   }
   void terminalStore.sendHex(props.channelId, dataToHex(data)).catch((e: unknown) => {
-    message.error(String(e))
+    message.error(errorMessage(e))
   })
 }
 

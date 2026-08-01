@@ -82,7 +82,7 @@ impl Transport for SerialTransport {
             .stop_bits(stop_bits)
             .timeout(std::time::Duration::from_millis(10))
             .open()
-            .map_err(|e| TransportError::Connect(e.to_string()))?;
+            .map_err(|e| TransportError::Connect(std::io::Error::other(e)))?;
 
         *self.port.lock().unwrap() = Some(port);
         Ok(())
@@ -103,7 +103,7 @@ impl Transport for SerialTransport {
             let deadline = Instant::now() + Duration::from_millis(100);
             while self.receiving.load(Ordering::Acquire) {
                 if Instant::now() >= deadline {
-                    return Err(TransportError::Send(
+                    return Err(TransportError::Message(
                         "RS485 半双工: 读取中无法发送，超时".to_string(),
                     ));
                 }
@@ -112,8 +112,7 @@ impl Transport for SerialTransport {
         }
         let mut guard = self.port.lock().unwrap();
         let port = guard.as_mut().ok_or(TransportError::NotConnected)?;
-        port.write(bytes)
-            .map_err(|e| TransportError::Send(e.to_string()))
+        port.write(bytes).map_err(TransportError::Send)
     }
 
     fn read(&self, buf: &mut [u8]) -> Result<usize, TransportError> {
@@ -123,8 +122,7 @@ impl Transport for SerialTransport {
         let result = {
             let mut guard = self.port.lock().unwrap();
             let port = guard.as_mut().ok_or(TransportError::NotConnected)?;
-            port.read(buf)
-                .map_err(|e| TransportError::Receive(e.to_string()))
+            port.read(buf).map_err(TransportError::Receive)
         };
         if self.config.half_duplex {
             self.receiving.store(false, Ordering::Release);

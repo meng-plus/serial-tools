@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="chat-view">
     <div class="toolbar">
       <a-space>
@@ -60,6 +60,7 @@
 
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { errorMessage } from '@/utils/error'
 import { message } from 'ant-design-vue'
 import { useRxHub, useTerminalStore } from '@/stores'
 import type { RxRecord } from '@/protocol/types'
@@ -157,7 +158,7 @@ async function handleSend() {
     }
     payload.value = ''
   } catch (e: unknown) {
-    message.error(String(e))
+    message.error(errorMessage(e))
   } finally {
     sending.value = false
   }

@@ -26,7 +26,7 @@ impl MqttTransport {
 impl Transport for MqttTransport {
     fn open(&mut self) -> Result<(), TransportError> {
         // TODO: 实现 MQTT 连接
-        Err(TransportError::Connect("MQTT 传输层尚未实现".to_string()))
+        Err(TransportError::Message("MQTT 传输层尚未实现".to_string()))
     }
 
     fn close(&mut self) -> Result<(), TransportError> {
@@ -35,11 +35,11 @@ impl Transport for MqttTransport {
     }
 
     fn write(&self, _bytes: &[u8]) -> Result<usize, TransportError> {
-        Err(TransportError::Send("MQTT 传输层尚未实现".to_string()))
+        Err(TransportError::Message("MQTT 传输层尚未实现".to_string()))
     }
 
     fn read(&self, _buf: &mut [u8]) -> Result<usize, TransportError> {
-        Err(TransportError::Receive("MQTT 传输层尚未实现".to_string()))
+        Err(TransportError::Message("MQTT 传输层尚未实现".to_string()))
     }
 
     fn is_active(&self) -> bool {

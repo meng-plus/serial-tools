@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div>
     <a-card title="数据总线" :bordered="false">
       <a-alert
@@ -83,6 +83,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { errorMessage } from '@/utils/error'
 import { message } from 'ant-design-vue'
 import { invoke } from '@/api'
 import { useConnectionStore } from '@/stores'
@@ -155,7 +156,7 @@ async function handleCreate() {
     newBusName.value = ''
     await refreshBuses()
   } catch (e: any) {
-    message.error(String(e))
+    message.error(errorMessage(e))
   } finally {
     creating.value = false
   }
@@ -179,7 +180,7 @@ async function handleSubscribe(busId: string) {
     newSub.direction = 'rx_to_bus'
     await refreshBuses()
   } catch (e: any) {
-    message.error(String(e))
+    message.error(errorMessage(e))
   }
 }
 
@@ -189,7 +190,7 @@ async function handleUnsubscribe(busId: string, channelId: string) {
     message.success('已取消订阅')
     await refreshBuses()
   } catch (e: any) {
-    message.error(String(e))
+    message.error(errorMessage(e))
   }
 }
 
@@ -199,7 +200,7 @@ async function handleStop(busId: string) {
     message.success('总线已停止')
     await refreshBuses()
   } catch (e: any) {
-    message.error(String(e))
+    message.error(errorMessage(e))
   }
 }
 
@@ -209,7 +210,7 @@ async function handleDelete(busId: string) {
     message.success('总线已删除')
     await refreshBuses()
   } catch (e: any) {
-    message.error(String(e))
+    message.error(errorMessage(e))
   }
 }
 

@@ -1,5 +1,6 @@
 //! 数据收发命令
 
+use crate::error::CommandError;
 use crate::state::{AppState, PacketEntry};
 use tauri::State;
 
@@ -42,10 +43,16 @@ fn append_suffix(mut data: Vec<u8>, suffix: Option<&str>) -> Vec<u8> {
     data
 }
 
-fn encode_chinese(text: &str, encoding: &'static encoding_rs::Encoding) -> Result<Vec<u8>, String> {
+fn encode_chinese(
+    text: &str,
+    encoding: &'static encoding_rs::Encoding,
+) -> Result<Vec<u8>, CommandError> {
     let (cow, _enc, had_errors) = encoding.encode(text);
     if had_errors {
-        return Err(format!("存在无法用 {} 编码的字符", encoding.name()));
+        return Err(CommandError::InvalidRequest(format!(
+            "存在无法用 {} 编码的字符",
+            encoding.name()
+        )));
     }
     Ok(cow.into_owned())
 }
@@ -55,15 +62,16 @@ fn encode_chinese(text: &str, encoding: &'static encoding_rs::Encoding) -> Resul
 pub async fn send_data(
     request: SendDataRequest,
     state: State<'_, AppState>,
-) -> Result<SendDataResponse, String> {
+) -> Result<SendDataResponse, CommandError> {
     if !state.channels.contains(&request.channel_id).await {
-        return Err(format!("通道 {} 不存在", request.channel_id));
+        return Err(CommandError::ChannelNotFound(request.channel_id.clone()));
     }
 
     let bytes = match request.format.as_str() {
         "hex" => {
             let clean = request.data.replace([' ', '\t', '\n', '\r'], "");
-            hex::decode(&clean).map_err(|e| format!("HEX 解析失败: {}", e))?
+            hex::decode(&clean)
+                .map_err(|e| CommandError::InvalidRequest(format!("HEX 解析失败: {}", e)))?
         }
         "text" | "utf-8" => append_suffix(request.data.into_bytes(), request.suffix.as_deref()),
         "gbk" => {
@@ -77,7 +85,12 @@ pub async fn send_data(
             raw = append_suffix(raw, request.suffix.as_deref());
             raw
         }
-        other => return Err(format!("不支持的格式: {}", other)),
+        other => {
+            return Err(CommandError::InvalidRequest(format!(
+                "不支持的格式: {}",
+                other
+            )))
+        }
     };
 
     let len = bytes.len();
@@ -116,7 +129,7 @@ pub async fn send_data(
 pub async fn get_packets(
     limit: Option<usize>,
     state: State<'_, AppState>,
-) -> Result<PacketResponse, String> {
+) -> Result<PacketResponse, CommandError> {
     let packets = state.packets.lock().await;
     let limit = limit.unwrap_or(500);
     let total = packets.len();
@@ -129,7 +142,7 @@ pub async fn get_packets(
 
 /// 清空数据包
 #[tauri::command]
-pub async fn clear_packets(state: State<'_, AppState>) -> Result<bool, String> {
+pub async fn clear_packets(state: State<'_, AppState>) -> Result<bool, CommandError> {
     state.packets.lock().await.clear();
     Ok(true)
 }

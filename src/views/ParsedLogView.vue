@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="parsed-log-view">
     <a-alert
       type="info"
@@ -282,6 +282,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
+import { errorMessage } from '@/utils/error'
 import { message, Modal } from 'ant-design-vue'
 import { useConnectionStore, useProtocolStore } from '@/stores'
 import type { BinaryNumberType, FieldExtract, BinaryFieldDef, ProtocolRule, RuleType } from '@/protocol/types'
@@ -678,7 +679,7 @@ function handleExport() {
         message.success(`已触发下载：${path}`)
       }
     } catch (e: unknown) {
-      message.error(String(e))
+      message.error(errorMessage(e))
     }
   })()
 }

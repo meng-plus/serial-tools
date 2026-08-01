@@ -15,6 +15,7 @@ use transport::Transport;
 
 use crate::channel_lifecycle::{finalize_from_app, note_reader_exit_from_app};
 use crate::disconnect_reason::DisconnectReason;
+use crate::error::CommandError;
 
 /// 推送给前端的连接变更事件
 #[derive(Clone, serde::Serialize)]
@@ -284,7 +285,7 @@ impl AppState {
         channel_id: &str,
         byte_timeout_ms: u64,
         frame_timeout_ms: u64,
-    ) -> Result<(), String> {
+    ) -> Result<(), CommandError> {
         let pair = self
             .get_or_init_serial_timeouts(channel_id, byte_timeout_ms, frame_timeout_ms)
             .await;
@@ -477,14 +478,16 @@ impl AppState {
         }
     }
 
-    pub async fn send_to_channel(&self, channel_id: &str, bytes: &[u8]) -> Result<usize, String> {
+    pub async fn send_to_channel(
+        &self,
+        channel_id: &str,
+        bytes: &[u8],
+    ) -> Result<usize, CommandError> {
         let transport = self
             .channels
             .get_transport(channel_id)
             .await
-            .ok_or_else(|| format!("通道 {} 不存在", channel_id))?;
-        transport
-            .write(bytes)
-            .map_err(|e| format!("发送失败: {}", e))
+            .ok_or_else(|| CommandError::ChannelNotFound(channel_id.to_string()))?;
+        transport.write(bytes).map_err(CommandError::from)
     }
 }

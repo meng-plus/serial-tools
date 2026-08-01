@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="chart-view">
     <div class="toolbar">
       <a-space wrap>
@@ -38,6 +38,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch, onMounted } from 'vue'
+import { errorMessage } from '@/utils/error'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart } from 'echarts/charts'
@@ -187,7 +188,7 @@ function handleExport() {
         message.success(`已触发下载：${path}`)
       }
     } catch (e: unknown) {
-      message.error(String(e))
+      message.error(errorMessage(e))
     }
   })()
 }

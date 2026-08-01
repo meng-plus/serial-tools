@@ -243,7 +243,10 @@ async fn test_appstate_send_to_nonexistent_channel() {
     let state = serial_tools_lib::state::AppState::default();
     let result = state.send_to_channel("no-such", b"test").await;
     assert!(result.is_err());
-    assert!(result.unwrap_err().contains("不存在"));
+    assert_eq!(
+        result.unwrap_err().code(),
+        serial_tools_lib::error::ErrorCode::ChannelNotFound
+    );
 }
 
 #[tokio::test]
@@ -380,7 +383,7 @@ async fn test_tcp_loopback_multi_send() {
 /// TCP 对端关闭后 read 返回 0
 #[tokio::test]
 async fn test_tcp_peer_close() {
-    use std::io::{Read, Write};
+    use std::io::Write;
     use std::net::TcpListener;
     use transport::tcp::TcpClientTransport;
 

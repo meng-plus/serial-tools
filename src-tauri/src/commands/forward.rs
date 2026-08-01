@@ -4,6 +4,7 @@
 //! 点对点转发 = 2 个通道订阅同一总线（A:RxToBus, B:TxFromBus）
 //! 广播 = 1 个 RxToBus + N 个 TxFromBus
 
+use crate::error::CommandError;
 use crate::state::{AppState, BusDirection, BusInfo, BusSubInfo, BusSubscription, DataBus};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -34,7 +35,7 @@ pub struct BusResponse {
 pub async fn create_bus(
     request: CreateBusRequest,
     state: State<'_, AppState>,
-) -> Result<BusResponse, String> {
+) -> Result<BusResponse, CommandError> {
     let bus_id = uuid::Uuid::new_v4().to_string();
     let (bus_tx, _) = tokio::sync::broadcast::channel(1024);
 
@@ -67,25 +68,32 @@ pub async fn create_bus(
 pub async fn subscribe_bus(
     request: SubscribeBusRequest,
     state: State<'_, AppState>,
-) -> Result<BusResponse, String> {
+) -> Result<BusResponse, CommandError> {
     if !state.channels.contains(&request.channel_id).await {
-        return Err(format!("通道 {} 不存在", request.channel_id));
+        return Err(CommandError::ChannelNotFound(request.channel_id.clone()));
     }
 
     let direction = match request.direction.as_str() {
         "rx_to_bus" => BusDirection::RxToBus,
         "tx_from_bus" => BusDirection::TxFromBus,
         "both" => BusDirection::Both,
-        _ => return Err(format!("不支持的方向: {}", request.direction)),
+        _ => {
+            return Err(CommandError::InvalidRequest(format!(
+                "不支持的方向: {}",
+                request.direction
+            )))
+        }
     };
 
     let mut buses = state.buses.write().await;
     let bus = buses
         .get_mut(&request.bus_id)
-        .ok_or_else(|| format!("总线 {} 不存在", request.bus_id))?;
+        .ok_or_else(|| CommandError::InvalidRequest(format!("总线 {} 不存在", request.bus_id)))?;
 
     if bus.cancel.load(Ordering::Relaxed) {
-        return Err("总线已停止，无法订阅".to_string());
+        return Err(CommandError::InvalidRequest(
+            "总线已停止，无法订阅".to_string(),
+        ));
     }
 
     if bus
@@ -93,14 +101,17 @@ pub async fn subscribe_bus(
         .iter()
         .any(|s| s.channel_id == request.channel_id)
     {
-        return Err(format!("通道 {} 已订阅此总线", request.channel_id));
+        return Err(CommandError::InvalidRequest(format!(
+            "通道 {} 已订阅此总线",
+            request.channel_id
+        )));
     }
 
     let transport = state
         .channels
         .get_transport(&request.channel_id)
         .await
-        .ok_or_else(|| format!("通道 {} 不存在", request.channel_id))?;
+        .ok_or_else(|| CommandError::ChannelNotFound(request.channel_id.clone()))?;
 
     let channel_id = request.channel_id.clone();
     let bus_tx = bus.bus_tx.clone();
@@ -219,11 +230,11 @@ pub async fn unsubscribe_bus(
     bus_id: String,
     channel_id: String,
     state: State<'_, AppState>,
-) -> Result<BusResponse, String> {
+) -> Result<BusResponse, CommandError> {
     let mut buses = state.buses.write().await;
     let bus = buses
         .get_mut(&bus_id)
-        .ok_or_else(|| format!("总线 {} 不存在", bus_id))?;
+        .ok_or_else(|| CommandError::InvalidRequest(format!("总线 {} 不存在", bus_id)))?;
 
     if let Some(sub_cancel) = bus.sub_cancels.remove(&channel_id) {
         sub_cancel.store(true, Ordering::Relaxed);
@@ -250,7 +261,7 @@ pub async fn unsubscribe_bus(
 
 /// 列出所有总线
 #[tauri::command]
-pub async fn list_buses(state: State<'_, AppState>) -> Result<Vec<BusInfo>, String> {
+pub async fn list_buses(state: State<'_, AppState>) -> Result<Vec<BusInfo>, CommandError> {
     let buses = state.buses.read().await;
     Ok(buses
         .values()
@@ -282,11 +293,14 @@ pub async fn list_buses(state: State<'_, AppState>) -> Result<Vec<BusInfo>, Stri
 
 /// 停止总线
 #[tauri::command]
-pub async fn stop_bus(bus_id: String, state: State<'_, AppState>) -> Result<BusResponse, String> {
+pub async fn stop_bus(
+    bus_id: String,
+    state: State<'_, AppState>,
+) -> Result<BusResponse, CommandError> {
     let mut buses = state.buses.write().await;
     let bus = buses
         .get_mut(&bus_id)
-        .ok_or_else(|| format!("总线 {} 不存在", bus_id))?;
+        .ok_or_else(|| CommandError::InvalidRequest(format!("总线 {} 不存在", bus_id)))?;
 
     bus.cancel.store(true, Ordering::Relaxed);
     for (_, sc) in bus.sub_cancels.drain() {
@@ -313,14 +327,16 @@ pub async fn stop_bus(bus_id: String, state: State<'_, AppState>) -> Result<BusR
 
 /// 删除总线（必须先停止）
 #[tauri::command]
-pub async fn delete_bus(bus_id: String, state: State<'_, AppState>) -> Result<bool, String> {
+pub async fn delete_bus(bus_id: String, state: State<'_, AppState>) -> Result<bool, CommandError> {
     let mut buses = state.buses.write().await;
     let bus = buses
         .get(&bus_id)
-        .ok_or_else(|| format!("总线 {} 不存在", bus_id))?;
+        .ok_or_else(|| CommandError::InvalidRequest(format!("总线 {} 不存在", bus_id)))?;
 
     if !bus.cancel.load(Ordering::Relaxed) {
-        return Err("请先停止总线再删除".to_string());
+        return Err(CommandError::InvalidRequest(
+            "请先停止总线再删除".to_string(),
+        ));
     }
 
     let bus = buses.remove(&bus_id).unwrap();

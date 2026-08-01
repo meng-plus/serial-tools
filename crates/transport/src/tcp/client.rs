@@ -49,19 +49,19 @@ impl Transport for TcpClientTransport {
         use std::net::ToSocketAddrs;
         let addr = (self.host.as_str(), self.port)
             .to_socket_addrs()
-            .map_err(|e| TransportError::Connect(format!("地址解析失败: {}", e)))?
+            .map_err(|e| TransportError::Message(format!("地址解析失败: {}", e)))?
             .next()
-            .ok_or_else(|| TransportError::Connect("无法解析主机地址".to_string()))?;
+            .ok_or_else(|| TransportError::Message("无法解析主机地址".to_string()))?;
 
         // 3 秒连接超时，避免长时间阻塞 UI
         let stream = TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(3))
-            .map_err(|e| TransportError::Connect(e.to_string()))?;
+            .map_err(TransportError::Connect)?;
         stream
             .set_read_timeout(Some(std::time::Duration::from_millis(10)))
-            .map_err(TransportError::Io)?;
+            .map_err(|e| TransportError::Message(e.to_string()))?;
         stream
             .set_write_timeout(Some(std::time::Duration::from_secs(3)))
-            .map_err(TransportError::Io)?;
+            .map_err(|e| TransportError::Message(e.to_string()))?;
         *self.stream.lock().unwrap() = Some(stream);
         Ok(())
     }
@@ -80,9 +80,7 @@ impl Transport for TcpClientTransport {
     fn write(&self, bytes: &[u8]) -> Result<usize, TransportError> {
         let mut guard = self.stream.lock().unwrap();
         let stream = guard.as_mut().ok_or(TransportError::NotConnected)?;
-        stream
-            .write(bytes)
-            .map_err(|e| TransportError::Send(e.to_string()))
+        stream.write(bytes).map_err(TransportError::Send)
     }
 
     fn read(&self, buf: &mut [u8]) -> Result<usize, TransportError> {
@@ -90,16 +88,10 @@ impl Transport for TcpClientTransport {
         let stream = guard.as_mut().ok_or(TransportError::NotConnected)?;
         match stream.read(buf) {
             Ok(n) => Ok(n),
-            Err(ref e)
-                if e.kind() == std::io::ErrorKind::WouldBlock
-                    || e.kind() == std::io::ErrorKind::TimedOut =>
-            {
-                // 超时/无数据：返回错误让读线程短暂休眠，勿当成 EOF(Ok(0))
-                Err(TransportError::Receive(e.to_string()))
-            }
             Err(e) => {
-                // 保留 ErrorKind，便于上层区分 RST 与临时错误
-                Err(TransportError::Io(e))
+                // 读超时(WouldBlock/TimedOut)与 RST 都保留 io::Error，
+                // 由上层按 ErrorKind 区分临时错误与对端断开
+                Err(TransportError::Receive(e))
             }
         }
     }

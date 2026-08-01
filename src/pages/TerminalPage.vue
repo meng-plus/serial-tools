@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="terminal-page">
     <div class="terminal-toolbar">
       <a-space wrap>
@@ -118,6 +118,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { errorMessage } from '@/utils/error'
 import { useRoute, useRouter } from 'vue-router'
 import { VerticalAlignBottomOutlined, SettingOutlined } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
@@ -197,7 +198,7 @@ async function handleSend() {
       )
     }
   } catch (e: any) {
-    message.error(String(e))
+    message.error(errorMessage(e))
   }
 }
 

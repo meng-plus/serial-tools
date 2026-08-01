@@ -2,6 +2,7 @@
 
 use crate::channel_lifecycle::{emit_connected, emit_disconnected};
 use crate::disconnect_reason::DisconnectReason;
+use crate::error::CommandError;
 use crate::state::AppState;
 use crate::tcp_server_monitor::spawn_tcp_server_monitor;
 use std::sync::Arc;
@@ -59,10 +60,12 @@ pub async fn connect(
     request: ConnectRequest,
     state: State<'_, AppState>,
     app: AppHandle,
-) -> Result<ConnectResponse, String> {
+) -> Result<ConnectResponse, CommandError> {
     let (channel_id, kind, addr) = match request.conn_type.as_str() {
         "serial" => {
-            let port = request.port.ok_or("请选择串口")?;
+            let port = request
+                .port
+                .ok_or_else(|| CommandError::InvalidRequest("请选择串口".to_string()))?;
             let baud_rate = request.baud_rate.unwrap_or(115200);
             let half_duplex = request.half_duplex.unwrap_or(false);
 
@@ -75,9 +78,7 @@ pub async fn connect(
                 half_duplex,
             };
             let mut transport = transport::serial::SerialTransport::new(config);
-            transport
-                .open()
-                .map_err(|e| format!("串口打开失败: {}", e))?;
+            transport.open()?;
 
             let channel_id = format!("serial-{}", port);
             let addr = port.clone();
@@ -102,13 +103,13 @@ pub async fn connect(
             (channel_id, "serial".to_string(), addr)
         }
         "tcp_client" => {
-            let host = request.host.ok_or("请输入主机地址")?;
+            let host = request
+                .host
+                .ok_or_else(|| CommandError::InvalidRequest("请输入主机地址".to_string()))?;
             let port = request.tcp_port.unwrap_or(5000);
 
             let mut transport = transport::tcp::TcpClientTransport::new(host.clone(), port);
-            transport
-                .open()
-                .map_err(|e| format!("TCP 连接失败: {}", e))?;
+            transport.open()?;
 
             let channel_id = format!("tcp-{}:{}", host, port);
             let addr = format!("{}:{}", host, port);
@@ -129,12 +130,12 @@ pub async fn connect(
         }
         "tcp_server" => {
             let bind_addr = request.host.unwrap_or_else(|| "0.0.0.0".to_string());
-            let port = request.tcp_port.ok_or("请输入监听端口")?;
+            let port = request
+                .tcp_port
+                .ok_or_else(|| CommandError::InvalidRequest("请输入监听端口".to_string()))?;
 
             let mut server = TcpServerTransport::new(bind_addr.clone(), port);
-            server
-                .open()
-                .map_err(|e| format!("TCP Server 启动失败: {}", e))?;
+            server.open()?;
 
             let channel_id = format!("tcp_server-{}:{}", bind_addr, port);
             let addr = format!("{}:{}", bind_addr, port);
@@ -165,7 +166,12 @@ pub async fn connect(
 
             (channel_id, "tcp_server".to_string(), addr)
         }
-        other => return Err(format!("不支持的连接类型: {}", other)),
+        other => {
+            return Err(CommandError::InvalidRequest(format!(
+                "不支持的连接类型: {}",
+                other
+            )))
+        }
     };
 
     emit_connected(&app, channel_id.clone(), kind, addr, None, None);
@@ -183,7 +189,7 @@ pub async fn disconnect(
     channel_id: String,
     state: State<'_, AppState>,
     app: AppHandle,
-) -> Result<ConnectResponse, String> {
+) -> Result<ConnectResponse, CommandError> {
     if channel_id.starts_with("tcp_server-") {
         state.close_server_local(&channel_id, &app).await;
     } else {
@@ -217,9 +223,11 @@ pub async fn disconnect_client(
     channel_id: String,
     state: State<'_, AppState>,
     app: AppHandle,
-) -> Result<ConnectResponse, String> {
+) -> Result<ConnectResponse, CommandError> {
     if !channel_id.starts_with("tcp_client-") {
-        return Err("仅支持 tcp_server 子客户端通道".to_string());
+        return Err(CommandError::InvalidRequest(
+            "仅支持 tcp_server 子客户端通道".to_string(),
+        ));
     }
     disconnect(channel_id, state, app).await
 }
@@ -229,7 +237,7 @@ pub async fn disconnect_client(
 pub async fn list_server_clients(
     server_channel_id: String,
     state: State<'_, AppState>,
-) -> Result<Vec<ServerClientInfo>, String> {
+) -> Result<Vec<ServerClientInfo>, CommandError> {
     let parents = state.client_parents.read().await;
     let mut result = Vec::new();
     for (client_id, parent) in parents.iter() {
@@ -254,7 +262,7 @@ pub async fn list_server_clients(
 pub async fn disconnect_all(
     state: State<'_, AppState>,
     app: AppHandle,
-) -> Result<ConnectResponse, String> {
+) -> Result<ConnectResponse, CommandError> {
     let mut ordered = state.channels.ids().await;
     ordered.sort_by_key(|id| if id.starts_with("tcp_server-") { 0 } else { 1 });
 
@@ -291,8 +299,8 @@ pub async fn disconnect_all(
 
 /// 列出可用串口
 #[tauri::command]
-pub async fn list_ports() -> Result<Vec<PortInfoResponse>, String> {
-    let ports = serialport::available_ports().map_err(|e| e.to_string())?;
+pub async fn list_ports() -> Result<Vec<PortInfoResponse>, CommandError> {
+    let ports = serialport::available_ports().map_err(|e| CommandError::Internal(e.to_string()))?;
     Ok(ports
         .into_iter()
         .map(|p| PortInfoResponse {
@@ -309,9 +317,11 @@ pub async fn set_serial_rx_timeout(
     byte_timeout_ms: u64,
     frame_timeout_ms: Option<u64>,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     if !channel_id.starts_with("serial-") {
-        return Err("仅串口通道支持超时分包".into());
+        return Err(CommandError::InvalidRequest(
+            "仅串口通道支持超时分包".into(),
+        ));
     }
     let frame_ms = frame_timeout_ms.unwrap_or_else(|| byte_timeout_ms.saturating_mul(4).max(200));
     state
@@ -334,7 +344,7 @@ pub async fn set_serial_rx_timeout(
 #[tauri::command]
 pub async fn get_connection_status(
     state: State<'_, AppState>,
-) -> Result<Vec<ConnectionStatusResponse>, String> {
+) -> Result<Vec<ConnectionStatusResponse>, CommandError> {
     let channels = state.channels.all().await;
     let parents = state.client_parents.read().await;
     let mut result = Vec::new();

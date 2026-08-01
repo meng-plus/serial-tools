@@ -99,6 +99,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { invoke } from '@/api'
 import { useConnectionStore, useWorkspaceStore } from '@/stores'
+import { errorMessage } from '@/utils/error'
 import type { ViewType } from '@/protocol/types'
 import {
   loadAppSettings,
@@ -153,7 +154,7 @@ function applyTimeout() {
       })
       saveChannelTimeout(channelId.value, byteTimeoutMs.value, frameTimeoutMs.value)
     } catch (e: unknown) {
-      message.error(String(e))
+      message.error(errorMessage(e))
     }
   }, 300)
 }

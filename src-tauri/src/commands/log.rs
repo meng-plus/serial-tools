@@ -1,5 +1,6 @@
 //! 日志管理命令
 
+use crate::error::CommandError;
 use crate::state::AppState;
 use tauri::State;
 
@@ -15,7 +16,7 @@ pub struct LogEntryResponse {
 pub async fn get_logs(
     limit: Option<usize>,
     state: State<'_, AppState>,
-) -> Result<Vec<LogEntryResponse>, String> {
+) -> Result<Vec<LogEntryResponse>, CommandError> {
     let logs = state.logs.lock().await;
     let limit = limit.unwrap_or(200);
     Ok(logs
@@ -32,7 +33,7 @@ pub async fn get_logs(
 }
 
 #[tauri::command]
-pub async fn clear_logs(state: State<'_, AppState>) -> Result<bool, String> {
+pub async fn clear_logs(state: State<'_, AppState>) -> Result<bool, CommandError> {
     state.logs.lock().await.clear();
     Ok(true)
 }

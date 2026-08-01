@@ -10,46 +10,64 @@ pub mod tcp;
 
 use thiserror::Error;
 
+/// 对端异常断开的分类（区别于优雅 FIN `Ok(0)`）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FatalDisconnectKind {
+    /// RST：连接被重置（含 Windows WSAECONNRESET）
+    Reset,
+    /// 连接被中止（含 Windows WSAECONNABORTED）
+    Aborted,
+    /// 写侧管道破裂（对端已关闭）
+    BrokenPipe,
+}
+
 #[derive(Error, Debug)]
 pub enum TransportError {
+    /// 连接建立失败（保留底层 `io::Error` 以便结构化判断）
     #[error("连接失败: {0}")]
-    Connect(String),
+    Connect(std::io::Error),
+    /// 发送失败（保留底层 `io::Error`）
     #[error("发送失败: {0}")]
-    Send(String),
+    Send(std::io::Error),
+    /// 接收失败（保留底层 `io::Error`，含读超时）
     #[error("接收失败: {0}")]
-    Receive(String),
+    Receive(std::io::Error),
+    /// 未连接时调用读写
     #[error("未连接")]
     NotConnected,
-    #[error("IO 错误: {0}")]
-    Io(#[from] std::io::Error),
+    /// 自定义业务错误消息（非对端断开，如 RS485 半双工超时）
+    #[error("{0}")]
+    Message(String),
+}
+
+/// 基于 `io::ErrorKind` + `raw_os_error` 判断对端异常断开，
+/// 不再依赖平台错误文本字符串匹配。
+fn classify_io(e: &std::io::Error) -> Option<FatalDisconnectKind> {
+    match e.kind() {
+        std::io::ErrorKind::ConnectionReset => Some(FatalDisconnectKind::Reset),
+        std::io::ErrorKind::ConnectionAborted => Some(FatalDisconnectKind::Aborted),
+        std::io::ErrorKind::BrokenPipe => Some(FatalDisconnectKind::BrokenPipe),
+        _ => match e.raw_os_error() {
+            Some(10054) => Some(FatalDisconnectKind::Reset), // WSAECONNRESET
+            Some(10053) => Some(FatalDisconnectKind::Aborted), // WSAECONNABORTED
+            Some(10052) => Some(FatalDisconnectKind::Reset), // WSAENETRESET
+            _ => None,
+        },
+    }
 }
 
 impl TransportError {
-    /// 对端异常断开（RST / 中止 / 管道破裂），区别于优雅 FIN(Ok(0))
-    pub fn is_fatal_disconnect(&self) -> bool {
-        fn msg_is_fatal(msg: &str) -> bool {
-            let lower = msg.to_lowercase();
-            lower.contains("connection reset")
-                || lower.contains("connection aborted")
-                || lower.contains("broken pipe")
-                || lower.contains("forcibly closed")
-                || lower.contains("软件中止")
-                || lower.contains("强制关闭")
-        }
+    /// 对端异常断开分类：RST / 中止 / 管道破裂；优雅 FIN 与业务消息为 None
+    pub fn fatal_kind(&self) -> Option<FatalDisconnectKind> {
         match self {
-            TransportError::Receive(msg)
-            | TransportError::Send(msg)
-            | TransportError::Connect(msg) => msg_is_fatal(msg),
-            TransportError::Io(e) => {
-                matches!(
-                    e.kind(),
-                    std::io::ErrorKind::ConnectionReset
-                        | std::io::ErrorKind::ConnectionAborted
-                        | std::io::ErrorKind::BrokenPipe
-                ) || msg_is_fatal(&e.to_string())
-            }
-            _ => false,
+            Self::Connect(e) | Self::Send(e) | Self::Receive(e) => classify_io(e),
+            _ => None,
         }
+    }
+
+    /// 是否对端异常断开（区别于优雅 FIN `Ok(0)`）
+    pub fn is_fatal_disconnect(&self) -> bool {
+        self.fatal_kind().is_some()
     }
 }
 
@@ -396,24 +414,77 @@ mod config_tests {
 
 #[cfg(test)]
 mod fatal_disconnect_tests {
-    use super::TransportError;
+    use super::{FatalDisconnectKind, TransportError};
 
     #[test]
     fn test_connection_reset_is_fatal() {
-        assert!(TransportError::Receive("Connection reset by peer".into()).is_fatal_disconnect());
         assert!(
-            TransportError::Io(std::io::Error::from(std::io::ErrorKind::ConnectionReset))
+            TransportError::Receive(std::io::Error::from(std::io::ErrorKind::ConnectionReset))
                 .is_fatal_disconnect()
         );
         assert!(
-            TransportError::Receive("An existing connection was forcibly closed".into())
+            TransportError::Send(std::io::Error::from(std::io::ErrorKind::ConnectionReset))
+                .is_fatal_disconnect()
+        );
+        // Windows 措辞文本仅作展示，判断依据是 io::ErrorKind
+        let win_err = std::io::Error::new(
+            std::io::ErrorKind::ConnectionReset,
+            "An existing connection was forcibly closed by the remote host",
+        );
+        assert!(TransportError::Receive(win_err).is_fatal_disconnect());
+        assert!(TransportError::Receive(std::io::Error::from(
+            std::io::ErrorKind::ConnectionAborted
+        ))
+        .is_fatal_disconnect());
+        assert!(
+            TransportError::Receive(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
                 .is_fatal_disconnect()
         );
     }
 
     #[test]
+    fn test_fatal_kind_classification() {
+        assert_eq!(
+            TransportError::Receive(std::io::Error::from(std::io::ErrorKind::ConnectionReset))
+                .fatal_kind(),
+            Some(FatalDisconnectKind::Reset)
+        );
+        assert_eq!(
+            TransportError::Receive(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
+                .fatal_kind(),
+            Some(FatalDisconnectKind::BrokenPipe)
+        );
+        assert_eq!(
+            TransportError::Message("RS485 半双工: 读取中无法发送，超时".to_string()).fatal_kind(),
+            None
+        );
+    }
+
+    #[test]
+    fn test_raw_os_error_winsock_mapping() {
+        // Windows WSAECONNRESET=10054：Unix 下 kind 为 Uncategorized，仍按 raw_os_error 识别
+        let reset = std::io::Error::from_raw_os_error(10054);
+        assert_eq!(
+            TransportError::Receive(reset).fatal_kind(),
+            Some(FatalDisconnectKind::Reset)
+        );
+        let aborted = std::io::Error::from_raw_os_error(10053);
+        assert_eq!(
+            TransportError::Send(aborted).fatal_kind(),
+            Some(FatalDisconnectKind::Aborted)
+        );
+    }
+
+    #[test]
     fn test_timeout_is_not_fatal() {
-        assert!(!TransportError::Receive("timed out".into()).is_fatal_disconnect());
+        assert!(
+            !TransportError::Receive(std::io::Error::from(std::io::ErrorKind::TimedOut))
+                .is_fatal_disconnect()
+        );
+        assert!(
+            !TransportError::Receive(std::io::Error::from(std::io::ErrorKind::WouldBlock))
+                .is_fatal_disconnect()
+        );
         assert!(!TransportError::NotConnected.is_fatal_disconnect());
     }
 }

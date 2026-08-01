@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div ref="rootRef" class="io-log-view" :style="fontStyle" tabindex="0" @keydown="onRootKeydown">
     <div class="toolbar">
       <a-space wrap>
@@ -159,6 +159,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { errorMessage } from '@/utils/error'
 import { message, Modal } from 'ant-design-vue'
 import { useConnectionStore, useTerminalStore, useTxPlannerStore } from '@/stores'
 import type { Encoding } from '@/stores/terminalStore'
@@ -364,7 +365,7 @@ async function reveal(path: string) {
   try {
     await revealPath(path)
   } catch (e: unknown) {
-    message.error(String(e))
+    message.error(errorMessage(e))
   }
 }
 
@@ -398,7 +399,7 @@ async function handleExport() {
       message.success(`已触发下载：${path}`)
     }
   } catch (e: unknown) {
-    message.error(String(e))
+    message.error(errorMessage(e))
   }
 }
 
@@ -430,7 +431,7 @@ async function toggleRealtime() {
       onOk: () => reveal(path),
     })
   } catch (e: unknown) {
-    message.error(String(e))
+    message.error(errorMessage(e))
   }
 }
 
@@ -470,7 +471,7 @@ async function handleSend() {
     pushHistory(raw)
     lastSent.value = raw
   } catch (e: unknown) {
-    message.error(String(e))
+    message.error(errorMessage(e))
   }
 }
 

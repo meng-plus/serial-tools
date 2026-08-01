@@ -3,6 +3,7 @@
 pub mod channel_lifecycle;
 pub mod commands;
 pub mod disconnect_reason;
+pub mod error;
 pub mod event_bridge;
 pub mod logger;
 pub mod state;

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="monitor-view">
     <div class="toolbar">
       <a-space>
@@ -20,6 +20,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { errorMessage } from '@/utils/error'
 import { message, Modal } from 'ant-design-vue'
 import { useValueBus, useProtocolStore, useConnectionStore } from '@/stores'
 import { exportTextToDisk, revealPath } from '@/utils/diskLog'
@@ -88,7 +89,7 @@ function handleExport() {
         message.success(`已触发下载：${path}`)
       }
     } catch (e: unknown) {
-      message.error(String(e))
+      message.error(errorMessage(e))
     }
   })()
 }

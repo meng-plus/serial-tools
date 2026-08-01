@@ -175,6 +175,7 @@ import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { ReloadOutlined } from '@ant-design/icons-vue'
 import { useConnectionStore } from '@/stores'
+import { errorMessage } from '@/utils/error'
 import { loadAppSettings, saveChannelTimeout } from '@/utils/appSettings'
 
 const FORM_STORAGE_KEY = 'serial-tools-conn-form'
@@ -265,7 +266,7 @@ async function handleConnect() {
       }
     }
   } catch (e: any) {
-    message.error(String(e))
+    message.error(errorMessage(e))
   } finally {
     connecting.value = false
   }
@@ -276,7 +277,7 @@ async function handleDisconnect(channelId: string) {
     await connectionStore.disconnect(channelId)
     message.success('已断开')
   } catch (e: any) {
-    message.error(String(e))
+    message.error(errorMessage(e))
   }
 }
 
@@ -285,7 +286,7 @@ async function handleKickClient(channelId: string) {
     await connectionStore.disconnectClient(channelId)
     message.success('客户端已断开')
   } catch (e: any) {
-    message.error(String(e))
+    message.error(errorMessage(e))
   }
 }
 

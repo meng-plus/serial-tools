@@ -2,6 +2,7 @@
 //!
 //! 接入解析管线前勿宣称「协议解析已可用」。见 ROADMAP P0。
 
+use crate::error::CommandError;
 use crate::state::AppState;
 use tauri::State;
 
@@ -26,7 +27,7 @@ pub struct FieldValue {
 pub async fn get_parsed_results(
     limit: Option<usize>,
     state: State<'_, AppState>,
-) -> Result<Vec<ParsedResult>, String> {
+) -> Result<Vec<ParsedResult>, CommandError> {
     // TODO: 从 pipeline 获取解析结果
     let _ = limit;
     let _ = &state;
@@ -34,7 +35,7 @@ pub async fn get_parsed_results(
 }
 
 #[tauri::command]
-pub async fn clear_parsed(state: State<'_, AppState>) -> Result<bool, String> {
+pub async fn clear_parsed(state: State<'_, AppState>) -> Result<bool, CommandError> {
     let _ = &state;
     Ok(true)
 }
