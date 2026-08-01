@@ -95,7 +95,7 @@ pub async fn connect(
             state
                 .log(
                     "info",
-                    "connection",
+                    crate::domain::log_source::LogSource::Connection,
                     &format!("串口 {} 已打开 @ {} baud", port, baud_rate),
                 )
                 .await;
@@ -121,7 +121,7 @@ pub async fn connect(
             state
                 .log(
                     "info",
-                    "connection",
+                    crate::domain::log_source::LogSource::Connection,
                     &format!("TCP {}:{} 已连接", host, port),
                 )
                 .await;
@@ -142,10 +142,9 @@ pub async fn connect(
 
             let server_arc = Arc::new(server);
             state
-                .tcp_servers
-                .write()
-                .await
-                .insert(channel_id.clone(), server_arc.clone());
+                .channels
+                .put_server(channel_id.clone(), server_arc.clone())
+                .await;
 
             let transport: Arc<dyn Transport> = server_arc.clone();
             state
@@ -159,7 +158,7 @@ pub async fn connect(
             state
                 .log(
                     "info",
-                    "connection",
+                    crate::domain::log_source::LogSource::Connection,
                     &format!("TCP Server 监听 {}:{} 已就绪", bind_addr, port),
                 )
                 .await;
@@ -197,7 +196,11 @@ pub async fn disconnect(
     }
 
     state
-        .log("info", "connection", &format!("{} 已断开", channel_id))
+        .log(
+            "info",
+            crate::domain::log_source::LogSource::Connection,
+            &format!("{} 已断开", channel_id),
+        )
         .await;
 
     emit_disconnected(
@@ -238,18 +241,18 @@ pub async fn list_server_clients(
     server_channel_id: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<ServerClientInfo>, CommandError> {
-    let parents = state.client_parents.read().await;
+    let parents = state.channels.all_parents().await;
     let mut result = Vec::new();
-    for (client_id, parent) in parents.iter() {
-        if parent == &server_channel_id {
-            let connected = state.channels.is_active(client_id).await;
+    for (client_id, parent) in parents {
+        if parent == server_channel_id {
+            let connected = state.channels.is_active(&client_id).await;
             let addr = client_id
                 .strip_prefix("tcp_client-")
-                .unwrap_or(client_id)
+                .unwrap_or(&client_id)
                 .to_string();
             result.push(ServerClientInfo {
                 addr,
-                channel_id: client_id.clone(),
+                channel_id: client_id,
                 connected,
             });
         }
@@ -288,7 +291,13 @@ pub async fn disconnect_all(
         );
     }
 
-    state.log("info", "connection", "所有通道已断开").await;
+    state
+        .log(
+            "info",
+            crate::domain::log_source::LogSource::Connection,
+            "所有通道已断开",
+        )
+        .await;
 
     Ok(ConnectResponse {
         success: true,
@@ -330,7 +339,7 @@ pub async fn set_serial_rx_timeout(
     state
         .log(
             "info",
-            "connection",
+            crate::domain::log_source::LogSource::Connection,
             &format!(
                 "串口 {} 断包超时: byte={}ms frame={}ms",
                 channel_id, byte_timeout_ms, frame_ms
@@ -346,7 +355,6 @@ pub async fn get_connection_status(
     state: State<'_, AppState>,
 ) -> Result<Vec<ConnectionStatusResponse>, CommandError> {
     let channels = state.channels.all().await;
-    let parents = state.client_parents.read().await;
     let mut result = Vec::new();
     for (id, transport) in channels {
         let desc = transport.descriptor();
@@ -356,7 +364,7 @@ pub async fn get_connection_status(
             transport_type: desc.kind.clone(),
             port_name: desc.address.clone(),
             clients: transport.client_info(),
-            parent_channel_id: parents.get(&id).cloned(),
+            parent_channel_id: state.channels.parent_of(&id).await,
         });
     }
     Ok(result)

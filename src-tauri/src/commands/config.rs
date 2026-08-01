@@ -39,7 +39,11 @@ pub async fn save_session(
     let path = dir.join(format!("{}.yaml", name));
     std::fs::write(&path, content).map_err(|e| CommandError::Internal(e.to_string()))?;
     state
-        .log("info", "config", &format!("保存会话配置: {}", name))
+        .log(
+            "info",
+            crate::domain::log_source::LogSource::Config,
+            &format!("保存会话配置: {}", name),
+        )
         .await;
     Ok(true)
 }
@@ -94,7 +98,11 @@ pub async fn delete_session(
         std::fs::remove_file(&path).map_err(|e| CommandError::Internal(e.to_string()))?;
     }
     state
-        .log("info", "config", &format!("删除会话配置: {}", name))
+        .log(
+            "info",
+            crate::domain::log_source::LogSource::Config,
+            &format!("删除会话配置: {}", name),
+        )
         .await;
     Ok(true)
 }

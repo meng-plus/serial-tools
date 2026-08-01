@@ -10,13 +10,21 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::AppHandle;
 use tokio::sync::{broadcast, Mutex, RwLock};
-use transport::tcp::TcpServerTransport;
 use transport::Transport;
 
 use crate::channel_lifecycle::{finalize_from_app, note_reader_exit_from_app};
 use crate::disconnect_reason::DisconnectReason;
+use crate::domain::bus_registry::BusRegistry;
+use crate::domain::packet_store::PacketStore;
 use crate::error::CommandError;
 use crate::recording::RecordingRegistry;
+
+pub use crate::domain::bus_registry::{
+    BusDirection, BusInfo, BusSubInfo, BusSubscription, DataBus,
+};
+pub use crate::domain::channel_manager::ChannelManager;
+pub use crate::domain::log_source::LogSource;
+pub use crate::domain::packet_store::{PacketEntry, RxBroadcastEvent};
 
 /// 推送给前端的连接变更事件
 #[derive(Clone, serde::Serialize)]
@@ -35,19 +43,6 @@ pub struct ConnectionEventPayload {
 // ── 数据包 & 日志 ──────────────────────────────────────────────
 
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct PacketEntry {
-    pub timestamp: String,
-    pub direction: String, // rx / tx
-    pub channel_id: String,
-    pub bytes: Vec<u8>,
-    pub hex: String,
-    pub text: String,
-    /// 与 rx_broadcast / 前端事件一致的序号，用于去重
-    #[serde(default)]
-    pub seq: u64,
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
 pub struct LogEntry {
     pub timestamp: String,
     pub level: String,
@@ -55,185 +50,35 @@ pub struct LogEntry {
     pub message: String,
 }
 
-// ── 数据总线 ──────────────────────────────────────────────────
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum BusDirection {
-    RxToBus,
-    TxFromBus,
-    Both,
-}
-
-#[derive(Debug, Clone)]
-pub struct BusSubscription {
-    pub channel_id: String,
-    pub direction: BusDirection,
-}
-
-pub struct DataBus {
-    pub id: String,
-    pub name: String,
-    pub subscriptions: Vec<BusSubscription>,
-    pub bus_tx: broadcast::Sender<Vec<u8>>,
-    pub cancel: Arc<AtomicBool>,
-    pub sub_cancels: HashMap<String, Arc<AtomicBool>>,
-    pub threads: Vec<std::thread::JoinHandle<()>>,
-    pub rx_bytes: Arc<AtomicU64>,
-    pub tx_bytes: Arc<AtomicU64>,
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct BusInfo {
-    pub id: String,
-    pub name: String,
-    pub subscriptions: Vec<BusSubInfo>,
-    pub status: String,
-    pub rx_bytes: u64,
-    pub tx_bytes: u64,
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct BusSubInfo {
-    pub channel_id: String,
-    pub direction: String,
-}
-
 // ── 应用全局状态 ────────────────────────────────────────────────
 
 /// 串口超时分包时间对（字节间超时, 帧超时）
 type SerialTimeoutPair = (AtomicU64, AtomicU64);
 
-/// 通道注册表：transport / cancel / 读线程句柄三表同步收口。
-///
-/// 原三张平行 `HashMap` 依赖调用方保证同步，移除时容易漂移；
-/// 收敛为单一入口后，`remove` 原子取走三项，杜绝「cancel 清了但 channel 还在」。
-pub struct ChannelRegistry {
-    channels: Arc<RwLock<HashMap<String, Arc<dyn Transport>>>>,
-    cancels: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
-    readers: Arc<RwLock<HashMap<String, std::thread::JoinHandle<()>>>>,
-}
-
-impl ChannelRegistry {
-    pub fn new() -> Self {
-        Self {
-            channels: Arc::new(RwLock::new(HashMap::new())),
-            cancels: Arc::new(RwLock::new(HashMap::new())),
-            readers: Arc::new(RwLock::new(HashMap::new())),
-        }
-    }
-
-    /// 注册传输（读线程启动前调用）
-    pub async fn put_transport(&self, channel_id: String, transport: Arc<dyn Transport>) {
-        self.channels.write().await.insert(channel_id, transport);
-    }
-
-    /// 注册取消标志（读线程启动前调用，保证并发移除可及时 cancel）
-    pub async fn put_cancel(&self, channel_id: String, cancel: Arc<AtomicBool>) {
-        self.cancels.write().await.insert(channel_id, cancel);
-    }
-
-    /// 注册读线程句柄（读线程创建后调用）
-    pub async fn put_reader(&self, channel_id: String, reader: std::thread::JoinHandle<()>) {
-        self.readers.write().await.insert(channel_id, reader);
-    }
-
-    pub async fn get_transport(&self, channel_id: &str) -> Option<Arc<dyn Transport>> {
-        self.channels.read().await.get(channel_id).cloned()
-    }
-
-    pub async fn contains(&self, channel_id: &str) -> bool {
-        self.channels.read().await.contains_key(channel_id)
-    }
-
-    pub async fn is_active(&self, channel_id: &str) -> bool {
-        self.channels
-            .read()
-            .await
-            .get(channel_id)
-            .map(|t| t.is_active())
-            .unwrap_or(false)
-    }
-
-    pub async fn ids(&self) -> Vec<String> {
-        self.channels.read().await.keys().cloned().collect()
-    }
-
-    pub async fn count(&self) -> usize {
-        self.channels.read().await.len()
-    }
-
-    /// 遍历全部通道（含传输引用），供状态快照
-    pub async fn all(&self) -> Vec<(String, Arc<dyn Transport>)> {
-        self.channels
-            .read()
-            .await
-            .iter()
-            .map(|(id, t)| (id.clone(), t.clone()))
-            .collect()
-    }
-
-    /// 原子取走 transport + cancel + 读线程句柄；未注册的项返回 None
-    pub async fn remove(
-        &self,
-        channel_id: &str,
-    ) -> (
-        Option<Arc<dyn Transport>>,
-        Option<Arc<AtomicBool>>,
-        Option<std::thread::JoinHandle<()>>,
-    ) {
-        let transport = self.channels.write().await.remove(channel_id);
-        let cancel = self.cancels.write().await.remove(channel_id);
-        let reader = self.readers.write().await.remove(channel_id);
-        (transport, cancel, reader)
-    }
-}
-
-impl Default for ChannelRegistry {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 pub struct AppState {
-    /// 通道注册表：transport / cancel / 读线程句柄三表同步收口
-    pub channels: Arc<ChannelRegistry>,
-    pub tcp_servers: Arc<RwLock<HashMap<String, Arc<TcpServerTransport>>>>,
-    pub client_parents: Arc<RwLock<HashMap<String, String>>>,
-    pub buses: RwLock<HashMap<String, DataBus>>,
-    pub packets: Arc<Mutex<Vec<PacketEntry>>>,
-    pub rx_broadcast: broadcast::Sender<RxBroadcastEvent>,
+    /// 通道注册表：transport / cancel / 读线程 / Server / 父子关系统一收口
+    pub channels: Arc<ChannelManager>,
+    /// 数据总线注册表
+    pub buses: BusRegistry,
+    /// 数据包缓冲 + 全局 RX 广播 + 单调序号
+    pub packets: Arc<PacketStore>,
     pub logs: Arc<Mutex<Vec<LogEntry>>>,
     pub log_broadcast: broadcast::Sender<LogEntry>,
-    /// 单调递增包序号，供前端去重/增量拉取
-    pub packet_seq: Arc<AtomicU64>,
     /// 串口超时分包：(byte_timeout_ms, frame_timeout_ms)，仅 serial 通道使用
     pub serial_rx_timeouts: Arc<RwLock<HashMap<String, Arc<SerialTimeoutPair>>>>,
     /// 数据录制注册表：每通道一个 DataLogger
     pub recordings: Arc<RecordingRegistry>,
 }
 
-#[derive(Debug, Clone)]
-pub struct RxBroadcastEvent {
-    pub channel_id: String,
-    pub bytes: Vec<u8>,
-    pub timestamp: String,
-    pub seq: u64,
-}
-
 impl Default for AppState {
     fn default() -> Self {
-        let (rx_broadcast, _) = broadcast::channel(1024);
         let (log_broadcast, _) = broadcast::channel(256);
         Self {
-            channels: Arc::new(ChannelRegistry::new()),
-            tcp_servers: Arc::new(RwLock::new(HashMap::new())),
-            client_parents: Arc::new(RwLock::new(HashMap::new())),
-            buses: RwLock::new(HashMap::new()),
-            packets: Arc::new(Mutex::new(Vec::with_capacity(10000))),
-            rx_broadcast,
+            channels: Arc::new(ChannelManager::new()),
+            buses: BusRegistry::new(),
+            packets: Arc::new(PacketStore::new()),
             logs: Arc::new(Mutex::new(Vec::with_capacity(1000))),
             log_broadcast,
-            packet_seq: Arc::new(AtomicU64::new(0)),
             serial_rx_timeouts: Arc::new(RwLock::new(HashMap::new())),
             recordings: Arc::new(RecordingRegistry::default()),
         }
@@ -241,28 +86,15 @@ impl Default for AppState {
 }
 
 impl AppState {
-    pub async fn log(&self, level: &str, source: &str, message: &str) {
+    pub async fn log(&self, level: &str, source: LogSource, message: &str) {
         let entry = LogEntry {
             timestamp: chrono::Local::now().format("%H:%M:%S%.3f").to_string(),
             level: level.to_string(),
-            source: source.to_string(),
+            source: source.as_str().to_string(),
             message: message.to_string(),
         };
         let _ = self.log_broadcast.send(entry.clone());
         self.logs.lock().await.push(entry);
-    }
-
-    pub async fn push_packet(&self, entry: PacketEntry) {
-        let mut packets = self.packets.lock().await;
-        packets.push(entry);
-        if packets.len() > 10000 {
-            let drain_count = packets.len() - 8000;
-            packets.drain(..drain_count);
-        }
-    }
-
-    pub fn next_seq(&self) -> u64 {
-        self.packet_seq.fetch_add(1, Ordering::Relaxed) + 1
     }
 
     /// 若不存在则创建；已存在则不覆盖（避免 spawn 覆盖 connect 传入值）
@@ -313,11 +145,11 @@ impl AppState {
             .await;
 
         let packets = self.packets.clone();
-        let rx_tx = self.rx_broadcast.clone();
-        let seq_counter = self.packet_seq.clone();
         let recordings = self.recordings.clone();
         let cid = channel_id.clone();
         let rt = tokio::runtime::Handle::current();
+        let rt_emit = rt.clone();
+        let cid_emit = cid.clone();
         let use_framer = transport.descriptor().kind == "serial";
         let timeout_pair = if use_framer {
             Some(self.get_or_init_serial_timeouts(&channel_id, 50, 200).await)
@@ -338,44 +170,17 @@ impl AppState {
                 })
             });
 
-            let emit_chunk = |data: Vec<u8>| {
+            let emit_chunk = move |data: Vec<u8>| {
                 if data.is_empty() {
                     return;
                 }
                 let ts = chrono::Local::now().format("%H:%M:%S%.3f").to_string();
-                let hex_str = hex::encode(&data);
-                let text = String::from_utf8_lossy(&data).to_string();
-                let seq = seq_counter.fetch_add(1, Ordering::Relaxed) + 1;
-                {
-                    let pkts = packets.clone();
-                    let cid = cid.clone();
-                    let ts2 = ts.clone();
-                    let data2 = data.clone();
-                    let hex2 = hex_str;
-                    let text2 = text;
-                    rt.block_on(async {
-                        let mut pkts = pkts.lock().await;
-                        pkts.push(PacketEntry {
-                            timestamp: ts2,
-                            direction: "rx".to_string(),
-                            channel_id: cid,
-                            bytes: data2,
-                            hex: hex2,
-                            text: text2,
-                            seq,
-                        });
-                        if pkts.len() > 10000 {
-                            let drain = pkts.len() - 8000;
-                            pkts.drain(..drain);
-                        }
-                    });
-                }
-                recordings.log_rx(&cid, &data, &ts);
-                let _ = rx_tx.send(RxBroadcastEvent {
-                    channel_id: cid.clone(),
-                    bytes: data,
-                    timestamp: ts,
-                    seq,
+                recordings.log_rx(&cid_emit, &data, &ts);
+                let cid_inner = cid_emit.clone();
+                let ts_inner = ts;
+                let pkts = packets.clone();
+                rt_emit.block_on(async move {
+                    let _ = pkts.push_rx(&cid_inner, data, &ts_inner).await;
                 });
             };
 
@@ -463,13 +268,13 @@ impl AppState {
         }
 
         // 先关闭传输，让阻塞的 read 尽快返回
-        if let Some(server) = self.tcp_servers.write().await.remove(channel_id) {
+        if let Some(server) = self.channels.remove_server(channel_id).await {
             let _ = server.shutdown();
         }
         if let Some(transport) = transport {
             let _ = transport.shutdown();
         }
-        self.client_parents.write().await.remove(channel_id);
+        self.channels.remove_parent(channel_id).await;
         self.recordings.remove(channel_id);
         {
             let mut t = self.serial_rx_timeouts.write().await;

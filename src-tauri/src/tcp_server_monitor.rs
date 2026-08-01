@@ -68,7 +68,7 @@ pub fn spawn_tcp_server_monitor(
                 state
                     .log(
                         "info",
-                        "tcp_server",
+                        crate::domain::log_source::LogSource::TcpServer,
                         &format!("新客户端通道已创建: {}", addr),
                     )
                     .await;

@@ -3,6 +3,7 @@
 pub mod channel_lifecycle;
 pub mod commands;
 pub mod disconnect_reason;
+pub mod domain;
 pub mod error;
 pub mod event_bridge;
 pub mod logger;
@@ -20,7 +21,7 @@ pub fn run() {
         .manage(AppState::default())
         .setup(|app| {
             let state = app.state::<AppState>();
-            event_bridge::start_event_bridge(app.handle().clone(), state.rx_broadcast.clone());
+            event_bridge::start_event_bridge(app.handle().clone(), state.packets.rx_sender());
             event_bridge::start_log_bridge(app.handle().clone(), state.log_broadcast.clone());
             Ok(())
         })

@@ -81,10 +81,9 @@ impl AppState {
         transport: Arc<dyn Transport>,
         app: AppHandle,
     ) {
-        self.client_parents
-            .write()
-            .await
-            .insert(client_id.clone(), parent_server_id);
+        self.channels
+            .set_parent(client_id.clone(), parent_server_id)
+            .await;
         self.register_channel(client_id, transport, app).await;
     }
 
@@ -96,7 +95,7 @@ impl AppState {
         let Ok(addr) = addr_str.parse::<SocketAddr>() else {
             return;
         };
-        if let Some(server) = self.tcp_servers.read().await.get(parent_server_id) {
+        if let Some(server) = self.channels.get_server(parent_server_id).await {
             server.kick_client(addr);
         }
     }
@@ -104,7 +103,7 @@ impl AppState {
     /// 本端主动关闭通道：必要时先踢写侧，再 remove_channel（不 emit）
     pub async fn close_channel_local(&self, channel_id: &str) {
         if channel_id.starts_with("tcp_client-") {
-            if let Some(parent) = self.client_parents.read().await.get(channel_id).cloned() {
+            if let Some(parent) = self.channels.parent_of(channel_id).await {
                 self.kick_server_client(&parent, channel_id).await;
             }
         }
@@ -113,14 +112,7 @@ impl AppState {
 
     /// 关闭 TCP Server 及其全部子客户端（本端），并对子客户端 emit Local
     pub async fn close_server_local(&self, server_channel_id: &str, app: &AppHandle) {
-        let child_ids: Vec<String> = self
-            .client_parents
-            .read()
-            .await
-            .iter()
-            .filter(|(_, parent)| *parent == server_channel_id)
-            .map(|(id, _)| id.clone())
-            .collect();
+        let child_ids: Vec<String> = self.channels.children_of(server_channel_id).await;
 
         for child_id in &child_ids {
             self.kick_server_client(server_channel_id, child_id).await;
@@ -152,7 +144,7 @@ impl AppState {
         reason: DisconnectReason,
         app: &AppHandle,
     ) {
-        let parent = self.client_parents.read().await.get(channel_id).cloned();
+        let parent = self.channels.parent_of(channel_id).await;
 
         if let Some(ref parent_id) = parent {
             self.kick_server_client(parent_id, channel_id).await;
@@ -162,13 +154,12 @@ impl AppState {
         if let Some(t) = transport {
             let _ = t.shutdown();
         }
-        self.client_parents.write().await.remove(channel_id);
+        self.channels.remove_parent(channel_id).await;
 
         let remaining = if let Some(ref parent_id) = parent {
-            self.tcp_servers
-                .read()
+            self.channels
+                .get_server(parent_id)
                 .await
-                .get(parent_id)
                 .map(|s| s.client_info())
         } else {
             None
@@ -183,7 +174,12 @@ impl AppState {
         } else {
             reason.user_message(channel_id)
         };
-        self.log(reason.log_level(), "connection", &msg).await;
+        self.log(
+            reason.log_level(),
+            crate::domain::log_source::LogSource::Connection,
+            &msg,
+        )
+        .await;
 
         emit_disconnected(
             app,
@@ -217,7 +213,9 @@ impl AppState {
         let entry = LogEntry {
             timestamp: chrono::Local::now().format("%H:%M:%S%.3f").to_string(),
             level: "info".to_string(),
-            source: "reader".to_string(),
+            source: crate::domain::log_source::LogSource::Reader
+                .as_str()
+                .to_string(),
             message: format!("读线程退出: {}", channel_id),
         };
         let _ = self.log_broadcast.send(entry.clone());

@@ -1,4 +1,4 @@
-//! 功能测试 — TCP Loopback 收发 + Mock Transport 状态管理
+﻿//! 功能测试 — TCP Loopback 收发 + Mock Transport 状态管理
 //!
 //! 测试策略：
 //!   1. 用 MockTransport 测试状态管理层（AppState）
@@ -34,7 +34,7 @@ fn test_mock_transport_lifecycle() {
 
 #[test]
 fn test_mock_transport_write_and_read() {
-    let mut m = make_open_mock("serial", "COM1");
+    let m = make_open_mock("serial", "COM1");
 
     // 写入
     let n = m.write(b"AT+RST\r\n").unwrap();
@@ -52,7 +52,7 @@ fn test_mock_transport_write_and_read() {
 
 #[test]
 fn test_mock_transport_multi_read_ordering() {
-    let mut m = make_open_mock("serial", "COM1");
+    let m = make_open_mock("serial", "COM1");
 
     m.enqueue_rx(b"first".to_vec());
     m.enqueue_rx(b"second".to_vec());
@@ -76,7 +76,7 @@ fn test_mock_transport_multi_read_ordering() {
 
 #[test]
 fn test_mock_transport_batch_write() {
-    let mut m = make_open_mock("serial", "COM1");
+    let m = make_open_mock("serial", "COM1");
 
     m.write(b"aaa").unwrap();
     m.write(b"bbb").unwrap();
@@ -92,7 +92,7 @@ fn test_mock_transport_batch_write() {
 
 #[test]
 fn test_mock_transport_large_data() {
-    let mut m = make_open_mock("serial", "COM1");
+    let m = make_open_mock("serial", "COM1");
 
     let data = vec![0xAB; 4096];
     m.enqueue_rx(data.clone());
@@ -151,7 +151,7 @@ async fn test_appstate_push_packet() {
         seq: 1,
     };
 
-    state.push_packet(entry).await;
+    state.packets.push_packet(entry).await;
 
     let packets = state.packets.lock().await;
     assert_eq!(packets.len(), 1);
@@ -174,7 +174,7 @@ async fn test_appstate_packet_overflow_trim() {
             text: String::new(),
             seq: i as u64 + 1,
         };
-        state.push_packet(entry).await;
+        state.packets.push_packet(entry).await;
     }
 
     let packets = state.packets.lock().await;
@@ -190,8 +190,16 @@ async fn test_appstate_packet_overflow_trim() {
 async fn test_appstate_log() {
     let state = serial_tools_lib::state::AppState::default();
 
-    state.log("info", "test", "message1").await;
-    state.log("error", "test", "message2").await;
+    state
+        .log("info", serial_tools_lib::state::LogSource::Test, "message1")
+        .await;
+    state
+        .log(
+            "error",
+            serial_tools_lib::state::LogSource::Test,
+            "message2",
+        )
+        .await;
 
     let logs = state.logs.lock().await;
     assert_eq!(logs.len(), 2);
@@ -252,7 +260,7 @@ async fn test_appstate_send_to_nonexistent_channel() {
 #[tokio::test]
 async fn test_appstate_rx_broadcast() {
     let state = serial_tools_lib::state::AppState::default();
-    let mut rx = state.rx_broadcast.subscribe();
+    let mut rx = state.packets.subscribe_rx();
 
     let event = serial_tools_lib::state::RxBroadcastEvent {
         channel_id: "ch1".to_string(),
@@ -261,7 +269,7 @@ async fn test_appstate_rx_broadcast() {
         seq: 1,
     };
 
-    state.rx_broadcast.send(event.clone()).unwrap();
+    state.packets.emit_rx(event.clone()).unwrap();
 
     let received = rx.recv().await.unwrap();
     assert_eq!(received.channel_id, "ch1");
@@ -603,12 +611,8 @@ async fn test_forward_tcp_to_tcp() {
 /// 场景测试：串口 ↔ TCP 转发（两个 Mock 模拟）
 #[tokio::test]
 async fn test_forward_serial_to_tcp_mock() {
-    use std::sync::atomic::{AtomicBool, Ordering};
-
     let serial = Arc::new(make_open_mock("serial", "COM3"));
     let tcp = Arc::new(make_open_mock("tcp_client", "192.168.1.100:5000"));
-
-    let cancel = Arc::new(AtomicBool::new(false));
 
     // 模拟串口 → TCP 单向转发
     serial.enqueue_rx(b"sensor:25.5".to_vec());
@@ -641,8 +645,20 @@ async fn test_log_broadcast() {
     let state = serial_tools_lib::state::AppState::default();
     let mut rx = state.log_broadcast.subscribe();
 
-    state.log("info", "test", "log message 1").await;
-    state.log("error", "test", "log message 2").await;
+    state
+        .log(
+            "info",
+            serial_tools_lib::state::LogSource::Test,
+            "log message 1",
+        )
+        .await;
+    state
+        .log(
+            "error",
+            serial_tools_lib::state::LogSource::Test,
+            "log message 2",
+        )
+        .await;
 
     let entry1 = rx.recv().await.unwrap();
     assert_eq!(entry1.level, "info");
@@ -657,8 +673,8 @@ async fn test_log_broadcast() {
 #[tokio::test]
 async fn test_rx_broadcast_multi_subscriber() {
     let state = serial_tools_lib::state::AppState::default();
-    let mut rx1 = state.rx_broadcast.subscribe();
-    let mut rx2 = state.rx_broadcast.subscribe();
+    let mut rx1 = state.packets.subscribe_rx();
+    let mut rx2 = state.packets.subscribe_rx();
 
     let event = serial_tools_lib::state::RxBroadcastEvent {
         channel_id: "ch1".to_string(),
@@ -666,7 +682,7 @@ async fn test_rx_broadcast_multi_subscriber() {
         timestamp: "12:00:00.000".to_string(),
         seq: 2,
     };
-    state.rx_broadcast.send(event).unwrap();
+    state.packets.emit_rx(event).unwrap();
 
     // 两个订阅者都应该收到
     let r1 = rx1.recv().await.unwrap();
@@ -681,7 +697,13 @@ async fn test_log_writes_to_both_logs_and_broadcast() {
     let state = serial_tools_lib::state::AppState::default();
     let mut rx = state.log_broadcast.subscribe();
 
-    state.log("warn", "system", "warning msg").await;
+    state
+        .log(
+            "warn",
+            serial_tools_lib::state::LogSource::System,
+            "warning msg",
+        )
+        .await;
 
     // 验证写入 logs
     let logs = state.logs.lock().await;
@@ -810,32 +832,17 @@ use std::net::TcpStream;
 // L7: 数据总线测试
 // ══════════════════════════════════════════════════════════════
 
-use serial_tools_lib::state::{BusDirection, DataBus};
+use serial_tools_lib::state::BusDirection;
 
 #[tokio::test]
 async fn test_bus_create_and_list() {
-    use transport::mock::MockTransport;
-    use transport::Transport;
-
     let state = serial_tools_lib::state::AppState::default();
-    let (bus_tx, _) = tokio::sync::broadcast::channel(1024);
-
-    let bus = DataBus {
-        id: "bus-1".to_string(),
-        name: "test-bus".to_string(),
-        subscriptions: Vec::new(),
-        bus_tx,
-        cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        sub_cancels: std::collections::HashMap::new(),
-        threads: Vec::new(),
-        rx_bytes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-        tx_bytes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-    };
-
-    state.buses.write().await.insert("bus-1".to_string(), bus);
-    let buses = state.buses.read().await;
+    let id = state.buses.create("test-bus").await;
+    let buses = state.buses.list().await;
     assert_eq!(buses.len(), 1);
-    assert_eq!(buses.get("bus-1").unwrap().name, "test-bus");
+    assert_eq!(buses[0].id, id);
+    assert_eq!(buses[0].name, "test-bus");
+    assert_eq!(buses[0].status, "running");
 }
 
 #[tokio::test]

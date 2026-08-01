@@ -100,7 +100,7 @@ pub async fn send_data(
     let timestamp = chrono::Local::now().format("%H:%M:%S%.3f").to_string();
     let hex_str = hex::encode(&bytes);
     let text = String::from_utf8_lossy(&bytes).to_string();
-    let seq = state.next_seq();
+    let seq = state.packets.next_seq();
 
     state.recordings.log_tx(&channel_id, &bytes, &timestamp);
 
@@ -113,7 +113,7 @@ pub async fn send_data(
         text: text.clone(),
         seq,
     };
-    state.push_packet(entry).await;
+    state.packets.push_packet(entry).await;
 
     Ok(SendDataResponse {
         success: true,
@@ -145,6 +145,6 @@ pub async fn get_packets(
 /// 清空数据包
 #[tauri::command]
 pub async fn clear_packets(state: State<'_, AppState>) -> Result<bool, CommandError> {
-    state.packets.lock().await.clear();
+    state.packets.clear().await;
     Ok(true)
 }
