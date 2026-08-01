@@ -9,6 +9,12 @@
 - 断开原因区分、优雅 FIN
 - 自定义右键、关于页 / 图标 / 迁移 GitHub 主仓库
 - 维护整理：`DisconnectReason` + `channel_lifecycle`、tcp 模块拆分、stub 标清
+- S1 错误类型化：`CommandError {code,message}` + `TransportError::fatal_kind()`（WSA 映射）
+- S2 录制接线：DataLogger（CSV/HEX/BIN/TXT）+ RecordingRegistry + 前端录制 UI
+- S3 领域服务拆分：`domain/{packet_store,bus_registry,channel_manager}`（内部模块）
+- S4 日志来源枚举化：`LogSource`（序列化契约不变）
+- S5 前端规范化：vendor 分包（vue-vendor/antd/echarts/xterm）
+- 新增：About 页更新检查 / GitHub Issues / gitea 引用清除
 
 ## 推荐下一阶段（按价值）
 

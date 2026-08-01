@@ -16,6 +16,7 @@ use transport::Transport;
 use crate::channel_lifecycle::{finalize_from_app, note_reader_exit_from_app};
 use crate::disconnect_reason::DisconnectReason;
 use crate::error::CommandError;
+use crate::recording::RecordingRegistry;
 
 /// 推送给前端的连接变更事件
 #[derive(Clone, serde::Serialize)]
@@ -207,6 +208,8 @@ pub struct AppState {
     pub packet_seq: Arc<AtomicU64>,
     /// 串口超时分包：(byte_timeout_ms, frame_timeout_ms)，仅 serial 通道使用
     pub serial_rx_timeouts: Arc<RwLock<HashMap<String, Arc<SerialTimeoutPair>>>>,
+    /// 数据录制注册表：每通道一个 DataLogger
+    pub recordings: Arc<RecordingRegistry>,
 }
 
 #[derive(Debug, Clone)]
@@ -232,6 +235,7 @@ impl Default for AppState {
             log_broadcast,
             packet_seq: Arc::new(AtomicU64::new(0)),
             serial_rx_timeouts: Arc::new(RwLock::new(HashMap::new())),
+            recordings: Arc::new(RecordingRegistry::default()),
         }
     }
 }
@@ -311,6 +315,7 @@ impl AppState {
         let packets = self.packets.clone();
         let rx_tx = self.rx_broadcast.clone();
         let seq_counter = self.packet_seq.clone();
+        let recordings = self.recordings.clone();
         let cid = channel_id.clone();
         let rt = tokio::runtime::Handle::current();
         let use_framer = transport.descriptor().kind == "serial";
@@ -365,6 +370,7 @@ impl AppState {
                         }
                     });
                 }
+                recordings.log_rx(&cid, &data, &ts);
                 let _ = rx_tx.send(RxBroadcastEvent {
                     channel_id: cid.clone(),
                     bytes: data,
@@ -464,6 +470,7 @@ impl AppState {
             let _ = transport.shutdown();
         }
         self.client_parents.write().await.remove(channel_id);
+        self.recordings.remove(channel_id);
         {
             let mut t = self.serial_rx_timeouts.write().await;
             t.remove(channel_id);

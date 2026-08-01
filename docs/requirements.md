@@ -219,6 +219,6 @@ Transport.read() → 读线程 → packets 缓冲 + rx_broadcast 广播
 - [ ] MQTT 传输层实现（当前仅占位）
 - [ ] UDP 传输层实现
 - [x] 串口超时断包参数可配置（设置默认 + 通道顶栏运行中可改）
-- [ ] 日志录制 BIN/CSV/HEX 格式
+- [x] 日志录制 BIN/CSV/HEX/TXT 格式（通道级，RX/TX 分文件）
 - [x] 协议解析：正则 / JSON / 厂家二进制帧（前端）；不做完整 Modbus 产品
 - [ ] 转发器面板 UI 完善（统计、状态实时更新）

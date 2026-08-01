@@ -6,6 +6,7 @@ pub mod disconnect_reason;
 pub mod error;
 pub mod event_bridge;
 pub mod logger;
+pub mod recording;
 pub mod state;
 pub mod tcp_server_monitor;
 
@@ -37,6 +38,10 @@ pub fn run() {
             commands::data::send_data,
             commands::data::get_packets,
             commands::data::clear_packets,
+            // 数据录制
+            commands::recording::start_channel_recording,
+            commands::recording::stop_channel_recording,
+            commands::recording::list_recordings,
             // 数据总线
             commands::forward::create_bus,
             commands::forward::subscribe_bus,

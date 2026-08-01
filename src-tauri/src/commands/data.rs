@@ -102,6 +102,8 @@ pub async fn send_data(
     let text = String::from_utf8_lossy(&bytes).to_string();
     let seq = state.next_seq();
 
+    state.recordings.log_tx(&channel_id, &bytes, &timestamp);
+
     let entry = PacketEntry {
         timestamp: timestamp.clone(),
         direction: "tx".to_string(),

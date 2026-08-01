@@ -7,4 +7,5 @@ pub mod forward;
 pub mod fs_util;
 pub mod log;
 pub mod protocol;
+pub mod recording;
 pub mod updater;

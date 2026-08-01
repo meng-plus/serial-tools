@@ -37,6 +37,20 @@
         >
           {{ realtimeOn ? '停止落盘' : '接收实时落盘' }}
         </a-button>
+        <a-select v-model:value="recordingFormat" style="width: 92px" size="small">
+          <a-select-option value="csv">CSV</a-select-option>
+          <a-select-option value="hex">HEX</a-select-option>
+          <a-select-option value="bin">BIN</a-select-option>
+          <a-select-option value="text">文本</a-select-option>
+        </a-select>
+        <a-button
+          size="small"
+          :type="recordingOn ? 'primary' : 'default'"
+          :danger="recordingOn"
+          @click="toggleRecording"
+        >
+          {{ recordingOn ? '停止录制' : '开始录制' }}
+        </a-button>
         <a-button size="small" @click="handleClear">清屏</a-button>
         <a-button size="small" @click="showVars = true">变量说明</a-button>
         <span class="rx-tx-counter">
@@ -57,6 +71,11 @@
       <span class="path-label">实时落盘中（仅 RX）：</span>
       <code class="path-text">{{ realtimePath }}</code>
       <a-button type="link" size="small" @click="reveal(realtimePath)">打开目录</a-button>
+    </div>
+    <div v-if="recordingDir" class="path-bar recording">
+      <span class="path-label">录制中（RX/TX）：</span>
+      <code class="path-text">{{ recordingDir }}</code>
+      <a-button type="link" size="small" @click="reveal(recordingDir)">打开目录</a-button>
     </div>
 
     <div v-if="sendHint" class="send-hint">{{ sendHint }}</div>
@@ -170,6 +189,12 @@ import {
   appendRealtimeLog,
   revealPath,
 } from '@/utils/diskLog'
+import {
+  startChannelRecording,
+  stopChannelRecording,
+  listRecordings,
+  type RecordingFormat,
+} from '@/utils/recording'
 import { CHECKSUM_CATALOG, type ChecksumAlgo } from '@/protocol/checksum'
 import {
   ENDIAN_OPTIONS,
@@ -205,6 +230,9 @@ const autoScroll = ref(true)
 const lastExportPath = ref('')
 const realtimeOn = ref(false)
 const realtimePath = ref('')
+const recordingOn = ref(false)
+const recordingDir = ref('')
+const recordingFormat = ref<RecordingFormat>('csv')
 const showVars = ref(false)
 const checksum = ref<ChecksumAlgo>('none')
 const checksumEndian = ref<Endian>('le')
@@ -292,16 +320,22 @@ const sendHint = computed(() => {
 
 onMounted(() => {
   terminalStore.activeChannelId = props.channelId
+  void syncRecordingState()
 })
 
 onUnmounted(() => {
   realtimeOn.value = false
   realtimePath.value = ''
+  recordingOn.value = false
+  recordingDir.value = ''
 })
 
 watch(() => props.channelId, (id) => {
   terminalStore.activeChannelId = id
   if (realtimeOn.value) void stopRealtime(true)
+  recordingOn.value = false
+  recordingDir.value = ''
+  void syncRecordingState()
 })
 
 watch(
@@ -442,6 +476,45 @@ async function stopRealtime(notify: boolean) {
   if (notify && p) message.info(`已停止落盘：${p}`)
 }
 
+/** 进入/切换通道时同步后端录制状态 */
+async function syncRecordingState() {
+  try {
+    const list = await listRecordings()
+    const mine = list.find(r => r.channel_id === props.channelId)
+    recordingOn.value = !!mine
+    recordingDir.value = mine?.output_dir ?? ''
+  } catch {
+    // 非 Tauri 或后端异常时保持未录制状态
+  }
+}
+
+async function toggleRecording() {
+  if (recordingOn.value) {
+    try {
+      const info = await stopChannelRecording(props.channelId)
+      recordingOn.value = false
+      recordingDir.value = ''
+      message.success(`录制已停止：${info.output_dir}`)
+    } catch (e: unknown) {
+      message.error(errorMessage(e))
+    }
+    return
+  }
+  try {
+    const info = await startChannelRecording(props.channelId, recordingFormat.value)
+    recordingOn.value = true
+    recordingDir.value = info.output_dir
+    Modal.success({
+      title: '已开始录制',
+      content: `按 ${recordingFormat.value.toUpperCase()} 记录本通道 RX/TX 数据。\n输出目录：\n${info.output_dir}`,
+      okText: '打开目录',
+      onOk: () => reveal(info.output_dir),
+    })
+  } catch (e: unknown) {
+    message.error(errorMessage(e))
+  }
+}
+
 function pushHistory(s: string) {
   history.value = [s, ...history.value.filter(x => x !== s)].slice(0, 20)
   historyIdx.value = -1
@@ -535,6 +608,7 @@ function handleSendKeydown(e: KeyboardEvent) {
   flex-wrap: wrap;
 }
 .path-bar.live { color: #389e0d; }
+.path-bar.recording { color: #c41d7f; }
 .path-label { flex-shrink: 0; }
 .path-text {
   font-size: 11px;

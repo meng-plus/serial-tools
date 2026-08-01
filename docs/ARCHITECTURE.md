@@ -20,8 +20,12 @@
 | UDP | ❌ 未实现 | 勿写成已交付 |
 | 协议解析管线 | 🚧 前端引擎 | 见 protocol-multi-view；后端 `protocol.rs` 仍 stub |
 | Framer 接线 | ✅ serial 读路径 | `spawn_reader` 仅用 byte/frame 超时；`delimiter` 恒为 None |
-| 日志 BIN/CSV/HEX 导出 | ❌ 未实现 | 仅内存系统日志 |
-| ChannelManager crate | 🔮 延后 | 现用 `AppState` |
+| 通道数据录制 | ✅ | `recording.rs` DataLogger，CSV/HEX/BIN/TXT → `serial-tools-data/recordings/<channel>` |
+| 命令错误契约 | ✅ | `CommandError` 序列化 `{code,message}`；前端 `errorMessage()` |
+| 日志来源枚举 | ✅ | `LogSource` 枚举，序列化保持 snake_case |
+| 更新检查 | ✅ | About 页 GitHub Releases 检查 + shell 打开外部 |
+| 领域服务拆分 | ✅ 内部模块 | `domain/{packet_store,bus_registry,channel_manager,log_source}` |
+| ChannelManager crate | 🔮 延后 | 内部模块已落地，独立 crate 待稳定后拆 |
 
 ---
 

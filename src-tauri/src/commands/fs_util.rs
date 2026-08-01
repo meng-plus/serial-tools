@@ -3,7 +3,7 @@
 use crate::error::CommandError;
 use std::path::{Path, PathBuf};
 
-fn data_root() -> PathBuf {
+pub(crate) fn data_root() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("serial-tools-data")

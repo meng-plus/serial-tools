@@ -196,7 +196,11 @@ BusSubscription { channel_id, direction: RxToBus | TxFromBus | Both }
 **已做**:
 - `transport::tcp` 拆为 `client` / `server` 模块
 - 通道生命周期统一入口；TCP Server 监控独立文件
-- stub 标清：`mqtt` / `commands/protocol` / `framer`（未接线）
+- stub 标清：`mqtt` / `commands/protocol` / `framer`（已接入 serial 读路径）
+- **结构化错误**：`CommandError {code,message}` + `TransportError::fatal_kind()`（WSAECONNRESET=10054 等分类）
+- **领域服务模块**：`domain/{packet_store,bus_registry,channel_manager,log_source}` 收敛 AppState
+- **通道数据录制**：`recording.rs`（DataLogger，CSV/HEX/BIN/TXT，TXT 按 UTF-8 容错解码）接线读线程 RX 与 `send_data` TX
+- **更新检查**：About 页 GitHub Releases 检查 + shell 打开外部
 
 **明确不做**（见 ROADMAP P3）:
 - 独立 ChannelManager crate
