@@ -200,13 +200,11 @@ cargo test --test integration_tests  # 集成测试
 
 ## 7. CI 构建
 
-项目提供 Docker 镜像用于 CI 环境：
+CI 使用 **GitHub Actions 官方 hosted runners（不使用 Docker）**，见 `.github/workflows/ci.yml`：
 
-```bash
-docker pull gitea.mengplus.top/mengplus/doi-studio-ci:latest
-```
-
-镜像内包含 Rust 工具链、Node.js 和所有构建依赖。
+- Linux：apt 安装 Tauri 系统依赖（libwebkit2gtk-4.1 等）后跑分层门禁（L1 前端 / L2 transport / L3 后端）
+- Release：Win（nsis/msi）+ Linux（deb/appimage）构建矩阵 → GitHub Release
+- 流水线分层门禁与产物命名约定见 `.github/workflows/DESIGN.md`（改动 workflow 前必读）
 
 ---
 

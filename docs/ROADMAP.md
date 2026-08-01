@@ -41,7 +41,7 @@
 ### P3 — 结构演进（勿抢跑）
 
 - ChannelManager / ProtocolChannel crate
-- Framer 正式接入读路径
+- Framer 接入后端协议解析管线
 - RS485 软件收发互斥
 
 ## 明确暂缓

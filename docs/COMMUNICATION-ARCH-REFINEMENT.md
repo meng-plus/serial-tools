@@ -285,8 +285,8 @@ pub trait Framer {
 
 ### Phase 3: 多路复用基础
 - [x] 简单 Framer（超时/定界符，见 `crates/transport/src/framer.rs`）
-- [ ] Framer 接入读路径 / 协议解析管线
-- [ ] `ProtocolChannel` 抽象（未实现）
+- [x] Framer 接入 serial 读路径（`state.rs` spawn_reader，仅超时断包；delimiter 未用）
+- [ ] Framer 接入后端协议解析管线 / `ProtocolChannel` 抽象（未实现）
 
 > **落地约束**：当前实现为 **sync Transport + std::thread**，不以孤立提交的 async 重写为准。详见 ARCHITECTURE.md / DESIGN-DECISIONS.md / ROADMAP.md。
 

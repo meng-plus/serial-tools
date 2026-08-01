@@ -1,6 +1,7 @@
-//! 分帧器（库内实现，**尚未接入** spawn_reader 读路径）
+//! 超时断包分帧器，已接入 `src-tauri` 的 serial 读路径（`state.rs` spawn_reader）。
 //!
-//! 业务仍按「每次 read 一块」推送；正式接线见 ROADMAP / REFINEMENT。
+//! 业务中仅使用 `byte_timeout` / `frame_timeout`，`delimiter` 恒为 `None`。
+//! 前端二进制规则解析另有分帧（`src/protocol/binaryFramer.ts`），二者相互独立。
 
 use std::time::{Duration, Instant};
 

@@ -4,12 +4,16 @@
 
 | 层级 | 类型 | 框架 | 位置 | 数量 |
 |------|------|------|------|------|
-| L1 | 单元测试 | cargo test | `crates/transport/src/lib.rs` | 43 |
-| L2 | 模块测试 | cargo test | `crates/transport/src/tcp.rs` | 16 |
-| L3 | 功能测试 | cargo test | `src-tauri/tests/integration_tests.rs` | 28 |
-| L4 | 前端测试 | vitest | `src/**/*.test.ts` | 27 |
-| L5 | 数据总线测试 | cargo test | `src-tauri/tests/integration_tests.rs` | 3 |
-| **合计** | | | | **117** |
+| L1 | Transport 单元测试 | cargo test | `crates/transport/src/lib.rs` | 23 |
+| L2 | TCP 模块测试 | cargo test | `crates/transport/src/tcp/` | 16 |
+| L3 | Framer 分帧器测试 | cargo test | `crates/transport/src/framer.rs` | 8 |
+| L4 | src-tauri 单元测试 | cargo test | `src-tauri/src/` | 8 |
+| L5 | 集成测试（AppState/事件/转发/总线） | cargo test | `src-tauri/tests/integration_tests.rs` | 31 |
+| **Rust 合计** | | | | **86** |
+| L6 | 前端测试 | vitest | `src/**/*.test.ts` | 71 |
+| **总计** | | | | **157** |
+
+> 数量统计于 2026-08-02；以 `cargo test --workspace` 与 `npm test` 的实际输出为准。
 
 ## 运行命令
 
@@ -55,7 +59,7 @@ npm run test:watch
 | test_mqtt_not_implemented | MQTT 未实现返回错误 |
 | test_config_serial_roundtrip | 序列化/反序列化 |
 | test_config_tcp_roundtrip | 序列化/反序列化 |
-| test_framer_* (7) | 分帧器：定界符、超时、空输入 |
+| test_framer_* (8) | 分帧器：定界符、超时、空输入 |
 
 ## L2: 模块测试 (TcpServerTransport)
 

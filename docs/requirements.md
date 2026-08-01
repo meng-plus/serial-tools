@@ -7,7 +7,7 @@
 
 ## 1. 产品定位
 
-通用串口调试工具，支持 UART（含 RS485 单总线）/ TCP / UDP / MQTT 多种通信方式，提供数据收发、转发、日志录制、协议解析等功能。
+通用串口调试工具，支持 UART（含 RS485 单总线）/ TCP 通信；UDP / MQTT（⏳ 计划中）。提供数据收发、转发、协议解析等功能；日志录制（⏳ 计划中）。
 
 **技术栈**：Rust + Tauri v2 + Vue 3 + TypeScript + Pinia + Ant Design Vue
 
@@ -20,18 +20,18 @@
 | 类型 | 模式 | 说明 |
 |------|------|------|
 | UART | 全双工 / 半双工(RS485) | 支持波特率、数据位、停止位、校验位配置 |
-| TCP | Client / Server | Server 默认 16 连接，可配置最大连接数 |
-| UDP | Client / Server / 多播 | 支持单播、服务器监听、多播组 |
-| MQTT | Client | 订阅/发布，支持 TLS（计划） |
+| TCP | Client / Server | Server 多客户端；当前无连接数上限（最大连接数配置 ⏳ 计划中） |
+| UDP | Client / Server / 多播 | ⏳ 计划中：支持单播、服务器监听、多播组 |
+| MQTT | Client | ⏳ 计划中：订阅/发布，支持 TLS |
 
 **RS485 要求**：
 - DE/RTS 方向控制由硬件管理，程序不控制 GPIO
-- 仅需限制：接收有数据期间不发起发送（半双工互斥）
+- 半双工互斥（接收有数据期间不发起发送）：⏳ 计划中，当前依赖硬件方向控制（见 ARCHITECTURE.md §8）
 
 **TCP Server 要求**：
 - 每个客户端连接创建独立通信通道线程
 - 支持动态踢出客户端
-- 最大连接数可配置
+- 最大连接数可配置（⏳ 计划中，当前无上限）
 
 ### 2.2 数据收发终端
 
@@ -74,9 +74,9 @@
 - **不做**完整 Modbus RTU/TCP 产品化（请用 Modbus Poll / Slave 等专用工具）；`CRC16-Modbus` 仅作为通用校验算法提供
 - JSON 数据字段提取
 - 正则表达式文本匹配
-- 字节模式匹配
+- 字节模式匹配（⏳ 计划中）
 
-### 2.6 日志录制
+### 2.6 日志录制（⏳ 计划中，当前仅内存系统日志）
 
 **可配置录制格式**：
 
@@ -96,7 +96,7 @@
 
 - 操作日志记录
 - 日志级别过滤
-- 日志导出 (CSV/JSON)
+- 日志导出 (CSV/JSON)（⏳ 计划中）
 
 ---
 
@@ -133,10 +133,12 @@
 pub trait Transport: Send + Sync {
     fn open(&mut self) -> Result<(), TransportError>;
     fn close(&mut self) -> Result<(), TransportError>;
+    fn shutdown(&self) -> Result<(), TransportError>; // 主动关：发 FIN
     fn write(&self, bytes: &[u8]) -> Result<usize, TransportError>;
     fn read(&self, buf: &mut [u8]) -> Result<usize, TransportError>;
     fn is_active(&self) -> bool;
     fn descriptor(&self) -> &TransportDescriptor;
+    fn duplex_mode(&self) -> DuplexMode; // 默认 Full；Serial 半双工 → Half
 }
 ```
 
@@ -155,7 +157,7 @@ TX 路径（同步）：
 | UART | 1 读线程 | 1 | 独占串口 |
 | TCP Server | 1 监听 + N 读线程 | N | 每客户端一个 |
 | TCP Client | 1 读线程 | 1 | 单连接 |
-| UDP | 1 读线程 | 1 | 单 socket |
+| UDP | ⏳ 计划中 | — | 目标：单 socket 单读线程 |
 
 ---
 
@@ -170,17 +172,18 @@ Transport.read() → 读线程 → packets 缓冲 + rx_broadcast 广播
 
 ### TX 路径
 ```
-前端输入 → Tauri command(data::send) → AppState.send_to_channel() → Transport.write()
+前端输入 → Tauri command（`send_data`）→ AppState.send_to_channel() → Transport.write()
 ```
 
 ---
 
-## 5. 通信转发
+## 5. 数据总线（端口转发）
 
-- `ForwarderInfo` 记录转发规则（源通道 → 目标通道，方向，统计）
-- `ForwarderHandle` 持有 cancel 标志和线程句柄
-- 转发线程订阅 `rx_broadcast`，匹配源通道后写入目标通道
-- 支持双向转发
+- 总线模型替代点对点转发：`create_bus` 创建命名总线，在线通道 `subscribe_bus` 订阅
+- 订阅方向：`rx_to_bus`（通道 RX → 总线）/ `tx_from_bus`（总线 → 通道 TX）/ `both`（双向）
+- 点对点转发 = A:rx_to_bus + B:tx_from_bus；广播 = 1 个 rx_to_bus + N 个 tx_from_bus
+- `RxToBus` 订阅 `rx_broadcast`（禁止 `transport.read()`）；`TxFromBus` 订阅 bus_tx 后写入通道
+- 命令：`create_bus` / `subscribe_bus` / `unsubscribe_bus` / `list_buses` / `stop_bus` / `delete_bus`
 
 ---
 
@@ -207,9 +210,9 @@ Transport.read() → 读线程 → packets 缓冲 + rx_broadcast 广播
 - [x] Vue 前端 7 页面（Connection/Terminal/Forward/Protocol/Log/Settings/About）
 - [x] 终端页面支持 TCP Server 客户端单独选择与发送
 - [x] 前端编码切换（UTF8/GBK/HEX）
-- [x] Framer 分帧器（超时断包、定界符、长度前缀）
+- [x] Framer 分帧器（超时断包已接入 serial 读路径；delimiter 模式库内可用；长度域分帧在前端 binaryFramer.ts）
 - [x] 事件桥接层（broadcast → Tauri emit，hex 字符串传输）
-- [x] 单元测试 + 集成测试（42 项通过）
+- [x] 单元测试 + 集成测试（Rust 86 + Vitest 71，见 docs/TESTING.md）
 
 ### 📋 待完善
 - [ ] RS485 半双工互斥控制（硬件层面，当前未限制发送时机）

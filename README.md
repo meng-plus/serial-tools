@@ -88,7 +88,7 @@ serial-tools/
 │           ├── tcp.rs          # TCP Client + Server
 │           ├── mqtt.rs         # MQTT（占位）
 │           ├── mock.rs         # Mock 传输（测试用）
-│           └── framer.rs       # 分帧器（超时/定界符/长度前缀）
+│           └── framer.rs       # 分帧器（超时断包，已接入 serial 读路径）
 ├── src-tauri/                  # Tauri 后端
 │   ├── src/
 │   │   ├── lib.rs              # Tauri 入口 + 命令注册
@@ -151,11 +151,14 @@ serial-tools/
 ## 测试
 
 ```bash
-# 运行全部测试（42 项）
-cargo test
+# 全部 Rust 测试（transport + src-tauri）
+cargo test --workspace
 
 # 仅运行集成测试
 cargo test --test integration_tests
+
+# 前端测试（Vitest）
+npm test
 ```
 
 测试层级：

@@ -19,7 +19,7 @@
 | MQTT | ⏳ 占位 | `mqtt.rs` stub，无 UI |
 | UDP | ❌ 未实现 | 勿写成已交付 |
 | 协议解析管线 | 🚧 前端引擎 | 见 protocol-multi-view；后端 `protocol.rs` 仍 stub |
-| Framer 接线 | ⏳ 库内有 | `framer.rs` 未接入业务 |
+| Framer 接线 | ✅ serial 读路径 | `spawn_reader` 仅用 byte/frame 超时；`delimiter` 恒为 None |
 | 日志 BIN/CSV/HEX 导出 | ❌ 未实现 | 仅内存系统日志 |
 | ChannelManager crate | 🔮 延后 | 现用 `AppState` |
 
