@@ -72,7 +72,7 @@
 
         <a-layout-footer v-show="!workspaceStore.viewImmersive" class="footer">
           <a-space split>
-            <span>Serial Tools v0.1.0</span>
+            <span>Serial Tools {{ APP_VERSION_LABEL }}</span>
             <span>RX: {{ terminalStore.rxCount }} | TX: {{ terminalStore.txCount }}</span>
           </a-space>
         </a-layout-footer>
@@ -98,6 +98,7 @@ import {
 import { isTauri } from './api/tauri'
 import AppContextMenu from './components/AppContextMenu.vue'
 import type { ChannelInfo } from './stores/connectionStore'
+import { APP_VERSION_LABEL } from './buildInfo'
 
 const isTauriEnv = isTauri()
 const router = useRouter()

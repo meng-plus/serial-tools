@@ -1,0 +1,115 @@
+# 设计意图见同目录 DESIGN.md（L1–L3 分层门禁，必跑测试）
+name: CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'LICENSE*'
+      - '.mimocode/**'
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'LICENSE*'
+      - '.mimocode/**'
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  frontend:
+    name: L1 frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests (Vitest)
+        run: npm test
+
+      - name: Typecheck and Vite build
+        run: npm run build
+
+  transport:
+    name: L2 transport
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: System deps (serialport)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libudev-dev
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+          prefix-key: transport
+
+      - name: Test transport crate
+        run: cargo test -p transport
+
+      - name: Check transport crate
+        run: cargo check -p transport
+
+  tauri-backend:
+    name: L3 tauri-backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: System deps (Tauri + serialport)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config libudev-dev \
+            libwebkit2gtk-4.1-dev \
+            build-essential curl wget file \
+            libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+          prefix-key: workspace
+
+      # tauri::generate_context! 要求 frontendDist（../dist）路径存在；
+      # L3 不跑完整前端构建，放占位即可通过编译期宏检查。
+      - name: Placeholder frontendDist for Tauri context
+        run: |
+          mkdir -p dist
+          printf '%s\n' '<!doctype html><title>ci</title>' > dist/index.html
+
+      - name: Test workspace
+        run: cargo test --workspace
+
+      - name: Check workspace
+        run: cargo check --workspace
+
+  ci-ok:
+    name: CI OK
+    needs: [frontend, transport, tauri-backend]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "L1+L2+L3 passed"

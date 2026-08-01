@@ -6,7 +6,8 @@
         <div class="header-text">
           <h1 class="app-name">Serial Tools</h1>
           <span class="app-desc">通信集成调试平台</span>
-          <a-tag color="blue" class="ver-tag">v0.1.0</a-tag>
+          <a-tag color="blue" class="ver-tag">{{ APP_VERSION_LABEL }}</a-tag>
+          <span class="build-meta">{{ APP_GIT_HASH_SHORT }} · {{ APP_BUILD_DATE }}</span>
         </div>
       </div>
 
@@ -60,6 +61,7 @@ import {
 } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 import { isTauri } from '@/api/tauri'
+import { APP_VERSION_LABEL, APP_GIT_HASH_SHORT, APP_BUILD_DATE } from '@/buildInfo'
 
 const QQ_GROUP = '790012859'
 /** QQ 客户端加群协议（无邀请码时尽力打开群资料） */
@@ -152,6 +154,11 @@ async function joinQqGroup() {
   font-size: 13px;
   line-height: 22px;
   padding: 0 10px;
+}
+.build-meta {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+  font-family: ui-monospace, monospace;
 }
 .section-divider {
   margin: 20px 0;

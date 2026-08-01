@@ -1,0 +1,192 @@
+# 设计意图见同目录 DESIGN.md（L4：tag / 手动发布 Win/Linux 安装包）
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '发布版本（如 v0.1.0 或 0.1.0）'
+        required: true
+        type: string
+      notes:
+        description: '可选：人工摘要（置顶；其后仍附自动生成变更）'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  prepare:
+    name: Prepare version
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.identity.outputs.tag }}
+      version: ${{ steps.identity.outputs.version }}
+    steps:
+      - name: Resolve build identity
+        id: identity
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RAW="${{ inputs.version }}"
+          else
+            RAW="${GITHUB_REF_NAME}"
+          fi
+          RAW="${RAW#v}"
+          if [ -z "$RAW" ]; then
+            echo "Empty version" >&2
+            exit 1
+          fi
+          TAG="v${RAW}"
+          echo "version=${RAW}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Resolved TAG=${TAG} SHA=${GITHUB_SHA}"
+
+  build:
+    name: Build ${{ matrix.os }}
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            os: windows
+            bundles: nsis,msi
+          - platform: ubuntu-22.04
+            os: linux
+            bundles: deb,appimage
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Export build env
+        shell: bash
+        run: |
+          echo "APP_VERSION=${{ needs.prepare.outputs.version }}" >> "$GITHUB_ENV"
+          echo "APP_GIT_HASH=${GITHUB_SHA}" >> "$GITHUB_ENV"
+          echo "APP_BUILD_DATE=$(date -u +%Y-%m-%d)" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Linux system deps
+        if: matrix.os == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config libudev-dev \
+            libwebkit2gtk-4.1-dev \
+            build-essential curl wget file \
+            libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+          prefix-key: release-${{ matrix.os }}
+
+      - name: Sync version into package.json / tauri.conf
+        run: node scripts/sync-version.mjs
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Install Tauri CLI
+        run: npm install -g @tauri-apps/cli@^2
+
+      - name: Tauri build
+        env:
+          APP_VERSION: ${{ env.APP_VERSION }}
+          APP_GIT_HASH: ${{ env.APP_GIT_HASH }}
+          APP_BUILD_DATE: ${{ env.APP_BUILD_DATE }}
+        run: npm run tauri -- build --bundles ${{ matrix.bundles }}
+
+      - name: Rename release assets
+        run: node scripts/rename-release-assets.mjs "${{ env.APP_VERSION }}" ${{ matrix.os }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: assets-${{ matrix.os }}
+          path: release-assets/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Download all assets
+        uses: actions/download-artifact@v8
+        with:
+          path: dist-assets
+          pattern: assets-*
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist-assets
+        run: |
+          sha256sum * > checksums-sha256.txt
+          cat checksums-sha256.txt
+
+      - name: Compose release notes
+        id: notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MANUAL_NOTES: ${{ inputs.notes }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          AUTO=$(gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f tag_name="$TAG" \
+            -f target_commitish="$GITHUB_SHA" \
+            --jq .body)
+
+          {
+            if [ -n "${MANUAL_NOTES:-}" ]; then
+              printf '%s\n\n---\n\n' "$MANUAL_NOTES"
+            fi
+            printf '%s\n' "$AUTO"
+          } > release-body.md
+
+          {
+            echo "body<<EOF"
+            cat release-body.md
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: Serial Tools ${{ needs.prepare.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          draft: false
+          prerelease: ${{ contains(needs.prepare.outputs.tag, '-') }}
+          body_path: release-body.md
+          files: dist-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

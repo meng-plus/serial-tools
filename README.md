@@ -55,10 +55,31 @@ cargo build
 
 详细构建指南见 [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md)。
 
+## CI / CD（GitHub Actions）
+
+设计说明（分层门禁、产物命名、构建信息）见 **[.github/workflows/DESIGN.md](.github/workflows/DESIGN.md)**，与 workflow 同目录，改流水线前请先读。
+
+| 触发 | 内容 |
+|------|------|
+| GitHub PR → `main` / push `main` | L1–L3 测试与检查（Node 22）；纯 `docs/**`、`*.md` 等变更会跳过 |
+| tag `v*.*.*` 或 Actions 手动 Run | Windows：**portable 免安装 exe** + nsis/msi；Linux：AppImage/deb → Release |
+
+Windows 未代码签名前请优先下载 `*-windows-x64-portable.exe`（等同本地 `npm run build:app` 后的主程序）。安装包若被 SmartScreen 拦截属预期，可点「更多信息 → 仍要运行」。
+
+```bash
+git tag v0.1.0
+git push github v0.1.0
+# 或：Actions → Release → Run workflow（可填可选 notes 摘要）
+```
+
+关于页版本以发布版本为准，并显示提交 hash 与构建日期（UTC `YYYY-MM-DD`）。
+
 ## 项目结构
 
 ```
 serial-tools/
+├── .github/workflows/          # CI/CD + DESIGN.md
+├── scripts/                    # 构建信息 / 版本同步 / 产物重命名
 ├── crates/
 │   └── transport/              # 传输层 trait + 实现
 │       └── src/
