@@ -3,8 +3,10 @@ import type { ViewInstance } from '@/protocol/types'
 import {
   WORKSPACE_VERSION,
   emptyPackage,
+  normalizeProtocolInstance,
   normalizeTxList,
   type FrameProfile,
+  type ProtocolInstanceTemplate,
   type TxListTemplate,
   type ViewTemplate,
   type WorkspacePackage,
@@ -17,6 +19,7 @@ export function buildWorkspacePackage(input: {
   txLists?: TxListTemplate[]
   frameProfiles?: FrameProfile[]
   settings?: Record<string, unknown>
+  protocolInstances?: ProtocolInstanceTemplate[]
 }): WorkspacePackage {
   const viewTemplates: ViewTemplate[] = (input.views || []).map(v => ({
     type: v.type,
@@ -32,6 +35,7 @@ export function buildWorkspacePackage(input: {
     viewTemplates,
     txLists: (input.txLists || []).map(l => normalizeTxList(l as unknown as Record<string, unknown>)),
     frameProfiles: input.frameProfiles || [],
+    protocolInstances: input.protocolInstances || [],
   }
 }
 
@@ -85,6 +89,12 @@ function normalizePackage(data: unknown): WorkspacePackage {
     : []
   pkg.frameProfiles = Array.isArray(obj.frameProfiles)
     ? (obj.frameProfiles as FrameProfile[])
+    : []
+  pkg.protocolInstances = Array.isArray(obj.protocolInstances)
+    ? obj.protocolInstances
+      .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object')
+      .map(normalizeProtocolInstance)
+      .filter((x): x is NonNullable<ReturnType<typeof normalizeProtocolInstance>> => x !== null)
     : []
   return pkg
 }

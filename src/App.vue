@@ -89,11 +89,11 @@ import zhCN from 'ant-design-vue/es/locale/zh_CN'
 import {
   LinkOutlined, SwapOutlined,
   FileTextOutlined, SettingOutlined, MenuUnfoldOutlined,
-  MenuFoldOutlined, InfoCircleOutlined, ApiOutlined, FolderOutlined,
+  MenuFoldOutlined, InfoCircleOutlined, ApiOutlined, FolderOutlined, AppstoreOutlined,
 } from '@ant-design/icons-vue'
 import {
   useConnectionStore, useTerminalStore, useLogStore,
-  useRxHub, useProtocolStore, useWorkspaceStore,
+  useRxHub, useProtocolStore, useWorkspaceStore, useProtocolRuntime,
 } from './stores'
 import { isTauri } from './api/tauri'
 import AppContextMenu from './components/AppContextMenu.vue'
@@ -109,12 +109,14 @@ const logStore = useLogStore()
 const rxHub = useRxHub()
 const protocolStore = useProtocolStore()
 const workspaceStore = useWorkspaceStore()
+const protocolRuntime = useProtocolRuntime()
 
 const collapsed = ref(false)
 
 const globalMenuItems = [
   { key: 'connection', label: '连接管理', icon: LinkOutlined },
   { key: 'forward', label: '端口转发', icon: SwapOutlined },
+  { key: 'protocol', label: '协议扩展', icon: AppstoreOutlined },
   { key: 'workspace-config', label: '工作区', icon: FolderOutlined },
   { key: 'log', label: '系统日志', icon: FileTextOutlined },
   { key: 'settings', label: '设置', icon: SettingOutlined },
@@ -168,6 +170,7 @@ onMounted(async () => {
   await connectionStore.init()
   await rxHub.init()
   protocolStore.init()
+  protocolRuntime.init()
   await terminalStore.init()
   await logStore.init()
 })
@@ -176,6 +179,7 @@ onUnmounted(() => {
   connectionStore.dispose()
   terminalStore.dispose()
   protocolStore.dispose()
+  protocolRuntime.dispose()
   rxHub.dispose()
   logStore.dispose()
 })

@@ -36,6 +36,7 @@ pub struct DataDirs {
     pub exports: String,
     pub channel_logs: String,
     pub sessions: String,
+    pub protocols: String,
 }
 
 #[tauri::command]
@@ -46,6 +47,7 @@ pub async fn get_data_dirs() -> Result<DataDirs, CommandError> {
         exports: root.join("exports").display().to_string(),
         channel_logs: root.join("channel-logs").display().to_string(),
         sessions: root.join("sessions").display().to_string(),
+        protocols: root.join("protocols").display().to_string(),
     })
 }
 

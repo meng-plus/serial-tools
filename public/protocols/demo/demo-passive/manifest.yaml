@@ -1,0 +1,47 @@
+id: demo-passive
+name: 演示协议（被动解析）
+description: 安装演示：按行分帧、字段表解码并推送变量的最小被动协议。用于验证扩展包安装 / 卸载 / 参数导入导出全链路。
+version: 1.0.0
+apiVersion: 1
+role: passive
+entry: main.js
+channelTypes:
+  - serial
+  - tcp_client
+capabilities:
+  - send
+  - storage
+  - chart
+ui:
+  params:
+    - key: fields
+      label: 字段表（解码规则）
+      type: table
+      columns:
+        - { key: name, label: 字段名, type: text, default: "v1" }
+        - { key: offset, label: 偏移, type: number, default: 0 }
+        - key: type
+          label: 类型
+          type: select
+          default: u16be
+          options:
+            - { value: u8, label: u8 }
+            - { value: i8, label: i8 }
+            - { value: u16le, label: u16le }
+            - { value: u16be, label: u16be }
+            - { value: i16le, label: i16le }
+            - { value: i16be, label: i16be }
+            - { value: u32le, label: u32le }
+            - { value: u32be, label: u32be }
+            - { value: f32le, label: f32le }
+            - { value: f32be, label: f32be }
+        - { key: scale, label: 系数, type: number, default: 1 }
+        - { key: bias, label: 偏移量, type: number, default: 0 }
+        - { key: unit, label: 单位, type: text, default: "" }
+    - key: eol
+      label: 行结束符
+      type: select
+      default: lf
+      options:
+        - { value: lf, label: LF }
+        - { value: crlf, label: CRLF }

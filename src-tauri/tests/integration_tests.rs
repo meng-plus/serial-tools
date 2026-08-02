@@ -264,6 +264,7 @@ async fn test_appstate_rx_broadcast() {
 
     let event = serial_tools_lib::state::RxBroadcastEvent {
         channel_id: "ch1".to_string(),
+        direction: "rx".to_string(),
         bytes: b"data".to_vec(),
         timestamp: "12:00:00.000".to_string(),
         seq: 1,
@@ -678,6 +679,7 @@ async fn test_rx_broadcast_multi_subscriber() {
 
     let event = serial_tools_lib::state::RxBroadcastEvent {
         channel_id: "ch1".to_string(),
+        direction: "rx".to_string(),
         bytes: b"multi".to_vec(),
         timestamp: "12:00:00.000".to_string(),
         seq: 2,

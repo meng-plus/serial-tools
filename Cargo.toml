@@ -27,6 +27,7 @@ serialport = "4"
 bytes = "1"
 uuid = { version = "1", features = ["v4"] }
 ureq = { version = "2.10", features = ["native-tls"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 transport = { path = "crates/transport" }
 

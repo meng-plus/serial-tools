@@ -144,6 +144,45 @@ pub async fn list_buses(
     Ok(state.buses.list().await)
 }
 
+/// 启动（恢复）已停止的总线：按保留的订阅记录重建线程
+#[tauri::command]
+pub async fn start_bus(
+    bus_id: String,
+    state: State<'_, AppState>,
+) -> Result<BusResponse, CommandError> {
+    let subs = state.buses.start(&bus_id).await?;
+    for sub in &subs {
+        let transport = state
+            .channels
+            .get_transport(&sub.channel_id)
+            .await
+            .ok_or_else(|| CommandError::ChannelNotFound(sub.channel_id.clone()))?;
+        state
+            .buses
+            .resume_subscription(
+                &bus_id,
+                &sub.channel_id,
+                transport,
+                state.packets.subscribe_rx(),
+            )
+            .await?;
+    }
+
+    state
+        .log(
+            "info",
+            crate::domain::log_source::LogSource::Bus,
+            &format!("总线 [{}] 已启动", bus_id),
+        )
+        .await;
+
+    Ok(BusResponse {
+        success: true,
+        bus_id,
+        message: "总线已启动".to_string(),
+    })
+}
+
 /// 停止总线
 #[tauri::command]
 pub async fn stop_bus(

@@ -62,7 +62,10 @@
           <template v-if="column.key === 'action'">
             <a-space>
               <a-button v-if="record.status === 'running'" size="small" danger @click="handleStop(record.id)">停止</a-button>
-              <a-button v-else size="small" @click="handleDelete(record.id)">删除</a-button>
+              <template v-else>
+                <a-button size="small" type="primary" @click="handleStart(record.id)">启动</a-button>
+                <a-button size="small" @click="handleDelete(record.id)">删除</a-button>
+              </template>
             </a-space>
           </template>
         </template>
@@ -188,6 +191,16 @@ async function handleUnsubscribe(busId: string, channelId: string) {
   try {
     await invoke('unsubscribe_bus', { busId, channelId })
     message.success('已取消订阅')
+    await refreshBuses()
+  } catch (e: any) {
+    message.error(errorMessage(e))
+  }
+}
+
+async function handleStart(busId: string) {
+  try {
+    await invoke('start_bus', { busId })
+    message.success('总线已启动')
     await refreshBuses()
   } catch (e: any) {
     message.error(errorMessage(e))

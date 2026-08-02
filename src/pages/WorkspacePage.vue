@@ -98,6 +98,7 @@ import {
   useProtocolStore,
   useWorkspaceStore,
   useTxPlannerStore,
+  useProtocolRuntime,
 } from '@/stores'
 import type { Encoding } from '@/stores/terminalStore'
 import { buildWorkspacePackage, parseWorkspace, serializeWorkspace } from '@/workspace/io'
@@ -108,6 +109,7 @@ const terminalStore = useTerminalStore()
 const protocolStore = useProtocolStore()
 const workspace = useWorkspaceStore()
 const txPlanner = useTxPlannerStore()
+const protocolRuntime = useProtocolRuntime()
 
 const showSaveModal = ref(false)
 const saveName = ref('')
@@ -179,6 +181,11 @@ async function exportPackage(format: 'yaml' | 'json') {
     txLists: lists,
     frameProfiles: txPlanner.frameProfiles,
     settings: readSettings(),
+    protocolInstances: protocolRuntime.instances.map(i => ({
+      protocolId: i.manifest.id,
+      enabled: i.enabled,
+      params: i.params,
+    })),
   })
   const content = serializeWorkspace(pkg, format)
   try {
@@ -219,6 +226,23 @@ async function onImportFile(ev: Event) {
     const cid = workspace.activeChannelId
     if (applyViewsOnImport.value && cid && pkg.viewTemplates.length) {
       workspace.replaceViewsFromTemplates(cid, pkg.viewTemplates)
+    }
+    // 恢复协议实例（应用到当前通道；缺失的协议包跳过）
+    if (cid && pkg.protocolInstances.length) {
+      let restored = 0
+      for (const t of pkg.protocolInstances) {
+        if (!protocolRuntime.getPackage(t.protocolId)) continue
+        const inst = await protocolRuntime.createInstance(t.protocolId, cid, t.params)
+        if (t.enabled) {
+          try {
+            await protocolRuntime.startInstance(inst.instanceId)
+          } catch {
+            // 启动失败不阻断其余恢复
+          }
+        }
+        restored++
+      }
+      if (restored > 0) message.success(`已恢复 ${restored} 个协议实例`)
     }
     message.success(
       `已导入：${pkg.rules.length} 条规则` +

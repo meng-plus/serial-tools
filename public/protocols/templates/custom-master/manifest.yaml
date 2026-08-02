@@ -1,0 +1,44 @@
+id: custom-master
+name: 自定义主站协议（模板）
+description: 主站模板：周期发送查询报文并关联应答，支持超时重试与离线标记。复制本目录为你的协议包，改 id/name 与 main.js 逻辑。
+version: 0.1.0
+apiVersion: 1
+role: master
+entry: main.js
+channelTypes:
+  - serial
+  - tcp_client
+capabilities:
+  - send
+  - storage
+  - chart
+ui:
+  params:
+    - key: command
+      label: 查询报文（hex）
+      type: text
+      default: ""
+      placeholder: 例如 01 03 00 00 00 0A
+    - key: cycle_ms
+      label: 轮询周期
+      type: number
+      default: 500
+      min: 100
+      max: 60000
+      step: 50
+    - key: timeout_ms
+      label: 响应超时
+      type: number
+      default: 300
+      min: 50
+      max: 5000
+      step: 10
+    - key: retry
+      label: 超时重试次数
+      type: number
+      default: 2
+      min: 0
+      max: 10
+  actions:
+    - id: poll_once
+      label: 立即查询一轮

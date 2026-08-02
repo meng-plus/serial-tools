@@ -6,6 +6,12 @@ import type { RxRecord } from '@/protocol/types'
 
 type Listener = (record: RxRecord) => void
 
+/** 订阅过滤器：direction 默认 all（rx+tx），channelId 为空表示全部通道 */
+export interface RxSubscribeOptions {
+  direction?: 'rx' | 'tx' | 'all'
+  channelId?: string
+}
+
 interface PacketRow {
   timestamp: string
   direction: string
@@ -44,9 +50,16 @@ export const useRxHub = defineStore('rxHub', () => {
   let pollTimer: ReturnType<typeof setInterval> | null = null
   let initPromise: Promise<void> | null = null
 
-  function subscribe(fn: Listener): () => void {
-    listeners.add(fn)
-    return () => listeners.delete(fn)
+  function subscribe(fn: Listener, opts?: RxSubscribeOptions): () => void {
+    const dir = opts?.direction ?? 'all'
+    const cid = opts?.channelId
+    const wrapped: Listener = (record) => {
+      if (dir !== 'all' && record.direction !== dir) return
+      if (cid && record.channelId !== cid) return
+      fn(record)
+    }
+    listeners.add(wrapped)
+    return () => listeners.delete(wrapped)
   }
 
   function emit(record: RxRecord) {

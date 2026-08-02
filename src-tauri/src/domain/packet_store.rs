@@ -22,10 +22,11 @@ pub struct PacketEntry {
     pub seq: u64,
 }
 
-/// 全局 RX 广播事件（读线程 → 前端 / 总线订阅者）
+/// 全局收发包广播事件（读线程 rx → 前端 / 总线订阅者；send_data tx → 总线订阅者）
 #[derive(Debug, Clone)]
 pub struct RxBroadcastEvent {
     pub channel_id: String,
+    pub direction: String, // rx / tx
     pub bytes: Vec<u8>,
     pub timestamp: String,
     pub seq: u64,
@@ -99,12 +100,29 @@ impl PacketStore {
 
     /// 追加一条 RX 包并广播（读线程调用）；返回分配的 seq
     pub async fn push_rx(&self, channel_id: &str, bytes: Vec<u8>, timestamp: &str) -> u64 {
+        self.push_with_direction("rx", channel_id, bytes, timestamp)
+            .await
+    }
+
+    /// 追加一条 TX 包并广播（send_data 成功后调用，供总线 TxFromBus 订阅者接收）
+    pub async fn push_tx(&self, channel_id: &str, bytes: Vec<u8>, timestamp: &str) -> u64 {
+        self.push_with_direction("tx", channel_id, bytes, timestamp)
+            .await
+    }
+
+    async fn push_with_direction(
+        &self,
+        direction: &str,
+        channel_id: &str,
+        bytes: Vec<u8>,
+        timestamp: &str,
+    ) -> u64 {
         let seq = self.next_seq();
         let hex_str = hex::encode(&bytes);
         let text = String::from_utf8_lossy(&bytes).to_string();
         self.push_packet(PacketEntry {
             timestamp: timestamp.to_string(),
-            direction: "rx".to_string(),
+            direction: direction.to_string(),
             channel_id: channel_id.to_string(),
             bytes: bytes.clone(),
             hex: hex_str,
@@ -114,6 +132,7 @@ impl PacketStore {
         .await;
         let _ = self.rx_broadcast.send(RxBroadcastEvent {
             channel_id: channel_id.to_string(),
+            direction: direction.to_string(),
             bytes,
             timestamp: timestamp.to_string(),
             seq,
@@ -148,6 +167,7 @@ mod tests {
 
         let evt = rx.try_recv().unwrap();
         assert_eq!(evt.channel_id, "serial-COM1");
+        assert_eq!(evt.direction, "rx");
         assert_eq!(evt.bytes, b"hello");
         assert_eq!(evt.seq, 1);
 
@@ -155,6 +175,25 @@ mod tests {
         assert_eq!(packets.len(), 1);
         assert_eq!(packets[0].direction, "rx");
         assert_eq!(packets[0].hex, "68656c6c6f");
+    }
+
+    #[tokio::test]
+    async fn push_tx_broadcast_and_buffer() {
+        let store = PacketStore::new();
+        let mut rx = store.subscribe_rx();
+        let seq = store.push_tx("serial-COM1", b"world".to_vec(), "t1").await;
+        assert_eq!(seq, 1);
+
+        let evt = rx.try_recv().unwrap();
+        assert_eq!(evt.channel_id, "serial-COM1");
+        assert_eq!(evt.direction, "tx");
+        assert_eq!(evt.bytes, b"world");
+        assert_eq!(evt.seq, 1);
+
+        let packets = store.lock().await;
+        assert_eq!(packets.len(), 1);
+        assert_eq!(packets[0].direction, "tx");
+        assert_eq!(packets[0].hex, "776f726c64");
     }
 
     #[tokio::test]

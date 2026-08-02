@@ -108,7 +108,7 @@
 DataBus {
     id, name,
     subscriptions: Vec<BusSubscription>,
-    bus_tx: broadcast::Sender<Vec<u8>>,
+    bus_tx: broadcast::Sender<BusEvent>,   // BusEvent { source_channel_id, bytes }
     cancel, threads, rx_bytes, tx_bytes,
 }
 
@@ -116,9 +116,11 @@ BusSubscription { channel_id, direction: RxToBus | TxFromBus | Both }
 ```
 
 **订阅方向语义**:
-- `RxToBus`: **订阅** `AppState.rx_broadcast`，按 channel_id 过滤后写入 `bus_tx`（禁止再 `transport.read`，避免双读者）
-- `TxFromBus`: 订阅 `bus_tx` → 写入通道 TX
+- `RxToBus`: **订阅** `AppState.rx_broadcast`（含 rx+tx），按 channel_id 过滤后写入 `bus_tx`（禁止再 `transport.read`，避免双读者）
+- `TxFromBus`: 订阅 `bus_tx` → 写入通道 TX；**跳过 `source_channel_id == 本通道` 的事件**，保证发送方不接收自己的发送
 - `Both`: 同时执行上述两个方向
+
+**广播语义**: 任一通道收到的数据（rx）或发出的数据（tx）经 `bus_tx` 广播给全部 `TxFromBus` 订阅者（除来源通道自身），天然一对多。`rx_broadcast` 由 `push_rx` / `push_tx` 统一喂入，`send_data` 成功后即广播 tx。
 
 **组合模式**:
 - 点对点转发: A(RxToBus) + B(TxFromBus)

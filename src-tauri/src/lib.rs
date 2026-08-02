@@ -48,6 +48,7 @@ pub fn run() {
             commands::forward::subscribe_bus,
             commands::forward::unsubscribe_bus,
             commands::forward::list_buses,
+            commands::forward::start_bus,
             commands::forward::stop_bus,
             commands::forward::delete_bus,
             // 日志
@@ -67,6 +68,11 @@ pub fn run() {
             // 协议解析
             commands::protocol::get_parsed_results,
             commands::protocol::clear_parsed,
+            // 协议扩展包管理
+            commands::protocol_fs::list_protocols,
+            commands::protocol_fs::read_protocol_file,
+            commands::protocol_fs::install_protocol_zip,
+            commands::protocol_fs::remove_protocol,
             // 更新检查
             commands::updater::check_for_update,
         ])

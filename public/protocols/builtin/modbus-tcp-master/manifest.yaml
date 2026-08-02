@@ -1,0 +1,56 @@
+id: modbus-tcp-master
+name: Modbus TCP 主站
+description: 通过 TCP 客户端通道周期轮询 Modbus TCP 从站（MBAP 封装，无 CRC），支持多设备、超时重试与离线标记。
+version: 1.0.0
+apiVersion: 1
+role: master
+entry: main.js
+channelTypes:
+  - tcp_client
+capabilities:
+  - send
+  - storage
+  - chart
+ui:
+  params:
+    - key: poll
+      label: 轮询表（设备 / 功能码 / 寄存器范围）
+      type: table
+      columns:
+        - { key: name, label: 名称, type: text, default: "" }
+        - { key: addr, label: 从站地址, type: number, default: 1 }
+        - { key: func, label: 功能码, type: number, default: 3 }
+        - { key: start, label: 起始寄存器, type: number, default: 0 }
+        - { key: count, label: 数量, type: number, default: 10 }
+    - key: cycle_ms
+      label: 轮询周期
+      type: number
+      default: 500
+      min: 100
+      max: 60000
+      step: 50
+    - key: timeout_ms
+      label: 响应超时
+      type: number
+      default: 500
+      min: 50
+      max: 5000
+      step: 10
+    - key: retry
+      label: 超时重试次数
+      type: number
+      default: 2
+      min: 0
+      max: 10
+    - key: byte_order
+      label: 寄存器字节序
+      type: select
+      default: be
+      options:
+        - { value: be, label: 大端（高字节在前） }
+        - { value: le, label: 小端（低字节在前） }
+  actions:
+    - id: read_all
+      label: 立即读取一轮
+    - id: clear_offline
+      label: 清除离线标记

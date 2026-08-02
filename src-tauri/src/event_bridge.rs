@@ -34,6 +34,10 @@ pub fn start_event_bridge(app: AppHandle, rx_sender: broadcast::Sender<RxBroadca
         loop {
             match rx.blocking_recv() {
                 Ok(event) => {
+                    // 广播现同时承载 rx / tx；前端终端的 rx-data 只对应真实接收，tx 由发送回包（send_data 返回值）入账
+                    if event.direction != "rx" {
+                        continue;
+                    }
                     let hex_str = hex::encode(&event.bytes);
                     let payload = RxEventPayload {
                         channel_id: event.channel_id,

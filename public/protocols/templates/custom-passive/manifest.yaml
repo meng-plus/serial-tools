@@ -1,0 +1,47 @@
+id: custom-passive
+name: 自定义被动协议（模板）
+description: 被动解析模板：收到数据按行分帧，按字段表解码变量。复制本目录为你的协议包，改 id/name 与 main.js 逻辑。
+version: 0.1.0
+apiVersion: 1
+role: passive
+entry: main.js
+channelTypes:
+  - serial
+  - tcp_client
+capabilities:
+  - send
+  - storage
+  - chart
+ui:
+  params:
+    - key: fields
+      label: 字段表（解码规则）
+      type: table
+      columns:
+        - { key: name, label: 字段名, type: text, default: "v1" }
+        - { key: offset, label: 偏移, type: number, default: 0 }
+        - key: type
+          label: 类型
+          type: select
+          default: u16be
+          options:
+            - { value: u8, label: u8 }
+            - { value: i8, label: i8 }
+            - { value: u16le, label: u16le }
+            - { value: u16be, label: u16be }
+            - { value: i16le, label: i16le }
+            - { value: i16be, label: i16be }
+            - { value: u32le, label: u32le }
+            - { value: u32be, label: u32be }
+            - { value: f32le, label: f32le }
+            - { value: f32be, label: f32be }
+        - { key: scale, label: 系数, type: number, default: 1 }
+        - { key: bias, label: 偏移量, type: number, default: 0 }
+        - { key: unit, label: 单位, type: text, default: "" }
+    - key: eol
+      label: 行结束符
+      type: select
+      default: lf
+      options:
+        - { value: lf, label: LF }
+        - { value: crlf, label: CRLF }

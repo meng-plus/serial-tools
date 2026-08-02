@@ -10,6 +10,7 @@ const VIEW_TITLES: Record<ViewType, string> = {
   tx_list: '定时发送',
   chat: '对话',
   vt100: 'VT100',
+  protocol_dashboard: '协议仪表盘',
 }
 
 let viewSeq = 0
@@ -93,7 +94,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const initialConfig =
       type === 'chart'
         ? { valueIds: [] as string[], maxPoints: 100, ...config }
-        : { ...config }
+        : type === 'protocol_dashboard'
+          ? { instanceId: '', controls: [] as unknown[], ...config }
+          : { ...config }
     const view: ViewInstance = {
       id: `view-${++viewSeq}`,
       type,

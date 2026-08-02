@@ -100,20 +100,12 @@ pub async fn send_data(
     let timestamp = chrono::Local::now().format("%H:%M:%S%.3f").to_string();
     let hex_str = hex::encode(&bytes);
     let text = String::from_utf8_lossy(&bytes).to_string();
-    let seq = state.packets.next_seq();
+    let seq = state
+        .packets
+        .push_tx(&channel_id, bytes.clone(), &timestamp)
+        .await;
 
     state.recordings.log_tx(&channel_id, &bytes, &timestamp);
-
-    let entry = PacketEntry {
-        timestamp: timestamp.clone(),
-        direction: "tx".to_string(),
-        channel_id: channel_id.clone(),
-        bytes: bytes.clone(),
-        hex: hex_str.clone(),
-        text: text.clone(),
-        seq,
-    };
-    state.packets.push_packet(entry).await;
 
     Ok(SendDataResponse {
         success: true,

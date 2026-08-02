@@ -1,0 +1,27 @@
+id: custom-slave
+name: 自定义从站协议（模板）
+description: 从站模板：按规则匹配请求报文并回填应答，寄存器表可编辑。复制本目录为你的协议包，改 id/name 与 main.js 逻辑。
+version: 0.1.0
+apiVersion: 1
+role: slave
+entry: main.js
+channelTypes:
+  - serial
+  - tcp_client
+capabilities:
+  - send
+  - storage
+  - chart
+ui:
+  params:
+    - key: device_id
+      label: 设备标识（匹配用）
+      type: number
+      default: 1
+    - key: registers
+      label: 数据表
+      type: table
+      columns:
+        - { key: key, label: 键, type: text, default: "v1" }
+        - { key: value, label: 值, type: number, default: 0 }
+        - { key: unit, label: 单位, type: text, default: "" }

@@ -2,7 +2,7 @@
 
 import type { ProtocolRule, ViewType } from '@/protocol/types'
 
-export const WORKSPACE_VERSION = 1
+export const WORKSPACE_VERSION = 2
 
 export interface ViewTemplate {
   type: ViewType
@@ -58,6 +58,13 @@ export interface FrameProfile {
   seqOffset: number
 }
 
+/** 协议实例模板：不绑死 channelId（与规则一致，加载时应用到当前通道） */
+export interface ProtocolInstanceTemplate {
+  protocolId: string
+  enabled: boolean
+  params: Record<string, unknown>
+}
+
 export interface WorkspacePackage {
   version: number
   kind: 'workspace_package'
@@ -68,6 +75,8 @@ export interface WorkspacePackage {
   viewTemplates: ViewTemplate[]
   txLists: TxListTemplate[]
   frameProfiles: FrameProfile[]
+  /** 协议扩展实例（v2 起） */
+  protocolInstances: ProtocolInstanceTemplate[]
 }
 
 export function emptyPackage(): WorkspacePackage {
@@ -79,6 +88,7 @@ export function emptyPackage(): WorkspacePackage {
     viewTemplates: [],
     txLists: [],
     frameProfiles: [],
+    protocolInstances: [],
   }
 }
 
@@ -97,6 +107,21 @@ export function createDefaultTxItem(partial?: Partial<TxListItem>): TxListItem {
 }
 
 /** 规范化条目；兼容旧字段 suffix / 列表级 intervalMs·loop */
+/** 规范化协议实例；兼容旧字段与缺失字段 */
+export function normalizeProtocolInstance(
+  raw: Record<string, unknown>,
+): ProtocolInstanceTemplate | null {
+  const protocolId = typeof raw.protocolId === 'string' && raw.protocolId ? raw.protocolId : ''
+  if (!protocolId) return null
+  return {
+    protocolId,
+    enabled: raw.enabled === true || raw.enabled === 'true',
+    params: raw.params && typeof raw.params === 'object' && !Array.isArray(raw.params)
+      ? (raw.params as Record<string, unknown>)
+      : {},
+  }
+}
+
 export function normalizeTxItem(
   raw: Record<string, unknown>,
   listDefaults?: { intervalMs?: number; loop?: boolean; frameProfileId?: string },

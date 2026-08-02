@@ -29,6 +29,7 @@ uuid = { version = "1", features = ["v4"] }
 transport.workspace = true
 encoding_rs = "0.8"
 ureq.workspace = true
+zip.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

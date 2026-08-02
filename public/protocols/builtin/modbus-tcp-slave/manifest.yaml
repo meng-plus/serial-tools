@@ -1,0 +1,36 @@
+id: modbus-tcp-slave
+name: Modbus TCP 从站
+description: TCP 从站模拟（MBAP 封装）：维护保持寄存器表，应答 03/06/10 功能码。配合 modbus-tcp-master 主站做本地主从闭环自测。
+version: 1.0.0
+apiVersion: 1
+role: slave
+entry: main.js
+channelTypes:
+  - tcp_client
+capabilities:
+  - send
+  - storage
+  - chart
+ui:
+  params:
+    - key: unit
+      label: 从站地址
+      type: number
+      default: 1
+      min: 1
+      max: 247
+    - key: registers
+      label: 保持寄存器表
+      type: table
+      columns:
+        - { key: reg, label: 寄存器地址, type: number, default: 0 }
+        - { key: value, label: 数值, type: number, default: 0 }
+        - { key: name, label: 名称, type: text, default: "" }
+        - { key: unit, label: 单位, type: text, default: "" }
+    - key: byte_order
+      label: 数据字节序
+      type: select
+      default: be
+      options:
+        - { value: be, label: 大端（高字节在前） }
+        - { value: le, label: 小端（低字节在前） }

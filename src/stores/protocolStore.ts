@@ -148,7 +148,7 @@ export const useProtocolStore = defineStore('protocol', () => {
     for (const r of hub.records) {
       processRecord(r)
     }
-    unsub = hub.subscribe(processRecord)
+    unsub = hub.subscribe(processRecord, { direction: 'rx' })
     if (!idleTimer) {
       idleTimer = setInterval(() => tickIdle(), 20)
     }

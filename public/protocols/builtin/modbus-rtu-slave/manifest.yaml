@@ -1,0 +1,43 @@
+id: modbus-rtu-slave
+name: Modbus RTU 从站
+description: RTU 从站模拟：维护线圈表与保持寄存器表，应答 01/02/03/04/05/06/0F/10 功能码（CRC16-Modbus 校验）。用于本地主从闭环自测。
+version: 1.1.0
+apiVersion: 1
+role: slave
+entry: main.js
+channelTypes:
+  - serial
+capabilities:
+  - send
+  - storage
+  - chart
+ui:
+  params:
+    - key: addr
+      label: 从站地址
+      type: number
+      default: 1
+      min: 1
+      max: 247
+    - key: coils
+      label: 线圈表（01 读 / 05 写单线圈 / 0F 写多线圈）
+      type: table
+      columns:
+        - { key: addr, label: 线圈地址, type: number, default: 0 }
+        - { key: value, label: 初始状态, type: number, default: 0 }
+        - { key: name, label: 名称, type: text, default: "" }
+    - key: registers
+      label: 保持寄存器表（03 读 / 06 写单 / 10 写多）
+      type: table
+      columns:
+        - { key: reg, label: 寄存器地址, type: number, default: 0 }
+        - { key: value, label: 数值, type: number, default: 0 }
+        - { key: name, label: 名称, type: text, default: "" }
+        - { key: unit, label: 单位, type: text, default: "" }
+    - key: byte_order
+      label: 数据字节序
+      type: select
+      default: be
+      options:
+        - { value: be, label: 大端（高字节在前） }
+        - { value: le, label: 小端（低字节在前） }
