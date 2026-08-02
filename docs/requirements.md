@@ -1,6 +1,6 @@
 # Serial Tools 需求文档
 
-> 版本：v2.0 | 更新：2026-07-31
+> 版本：v2.1 | 更新：2026-08-02
 > 文档先行，基于已实现代码补全
 
 ---
@@ -71,21 +71,22 @@
 - 厂家自定义二进制：定界符 / 长度域 / 静默超时分帧 + 字段表 + 常用校验（已落地）
 - 一条匹配规则可配置多个提取字段（软上限 32）；监控/图表按各字段 `valueId` 订阅
 - 多字节数值类型与 CRC/累加和：UI 以「小端/大端 + 线序示例」展示，可单独改写校验写入端序
-- **协议扩展系统（protocol-ext，已交付）**：前端 JS 脚本 + manifest.yaml 定义协议，安装/启用无需重编译；声明式参数表单、动作、变量表；协议实例绑定通道运行；内置 Modbus RTU/TCP 主站+从站参考实现（本地主从闭环自测）、三类模板、演示包；网格布局协议仪表盘；参数导入导出（YAML/JSON/CSV 表格）、读取数据导出（CSV/JSON）；工作区持久化协议实例。详见 [protocol-ext/](./protocol-ext/README.md)
+- **协议扩展系统（protocol-ext，已交付）**：前端 JS 脚本 + manifest.yaml 定义协议，安装/启用无需重编译；声明式参数表单（含 `file` 文件参数）、动作、变量表；协议实例绑定通道运行；内置 Modbus RTU/TCP 主站+从站参考实现（本地主从闭环自测）、三类模板、演示包；网格布局协议仪表盘；参数导入导出（YAML/JSON/CSV 表格）、读取数据导出（CSV/JSON）；工作区持久化协议实例。YMODEM 文件传输（双向下发/读取固件文件）为手动安装演示包。详见 [protocol-ext/](./protocol-ext/README.md)
 - **不做**完整 Modbus RTU/TCP 产品化（请用 Modbus Poll / Slave 等专用工具）；`CRC16-Modbus` 仅作为通用校验算法提供
 - JSON 数据字段提取
 - 正则表达式文本匹配
 - 字节模式匹配（⏳ 计划中）
 
-### 2.6 日志录制（⏳ 计划中，当前仅内存系统日志）
+### 2.6 通道数据录制（已实现）
 
-**可配置录制格式**：
+**可配置录制格式**（通道级，RX/TX 分文件，落盘 `serial-tools-data/recordings/<channel>`）：
 
 | 格式 | 说明 |
 |------|------|
 | BIN | 最原始字节，rx/tx 独立存储文件 |
 | CSV | 带时间戳，支持按展示方式记录（UTF8/GBK/HEX） |
-| HEX TEXT | 十六进制文本记录 |
+| HEX | 十六进制文本记录 |
+| TXT | UTF-8 容错解码文本记录 |
 
 ### 2.7 会话管理
 
@@ -97,7 +98,7 @@
 
 - 操作日志记录
 - 日志级别过滤
-- 日志导出 (CSV/JSON)（⏳ 计划中）
+- 系统日志导出 (CSV/JSON)（⏳ 计划中）
 
 ---
 
@@ -213,7 +214,7 @@ Transport.read() → 读线程 → packets 缓冲 + rx_broadcast 广播
 - [x] 前端编码切换（UTF8/GBK/HEX）
 - [x] Framer 分帧器（超时断包已接入 serial 读路径；delimiter 模式库内可用；长度域分帧在前端 binaryFramer.ts）
 - [x] 事件桥接层（broadcast → Tauri emit，hex 字符串传输）
-- [x] 单元测试 + 集成测试（Rust 86 + Vitest 71，见 docs/TESTING.md）
+- [x] 单元测试 + 集成测试（Rust 131 + Vitest 139，见 docs/TESTING.md）
 
 ### 📋 待完善
 - [ ] RS485 半双工互斥控制（硬件层面，当前未限制发送时机）

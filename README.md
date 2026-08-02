@@ -7,8 +7,8 @@
 - **多协议连接**：UART（含 RS485 半双工标记）/ TCP Client / TCP Server；MQTT / UDP（计划中）
 - **数据终端**：XShell 风格，UTF-8 / GBK / HEX；事件驱动收包
 - **端口转发**：数据总线模型，点对点 / 广播 / 双向
-- **协议解析**：正则 / JSON / 厂家二进制帧（分帧+字段表+校验）；不做完整 Modbus 主站
-- **系统日志**：内存日志流；BIN/CSV 导出计划中
+- **协议解析**：正则 / JSON / 厂家二进制帧（分帧+字段表+校验）；不做完整 Modbus 产品化；**协议扩展系统**（前端 JS + manifest.yaml 定义/新增协议，免重编译），内置 Modbus RTU/TCP 主站+从站参考实现、演示 YMODEM 文件传输包（见 [docs/protocol-ext/](docs/protocol-ext/README.md)）
+- **系统日志**：内存日志流 + 通道数据录制（BIN/CSV/HEX/TXT）；日志导出（CSV/JSON）计划中
 - **会话管理**：YAML 配置保存 / 加载
 
 ## 技术栈

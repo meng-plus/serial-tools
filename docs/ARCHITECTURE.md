@@ -18,8 +18,8 @@
 | 自定义右键菜单 | ✅ | 替代浏览器默认菜单 |
 | MQTT | ⏳ 占位 | `mqtt.rs` stub，无 UI |
 | UDP | ❌ 未实现 | 勿写成已交付 |
-| 协议解析管线 | 🚧 前端引擎 | 见 protocol-multi-view；后端 `protocol.rs` 仍 stub |
-| 协议扩展系统（protocol-ext） | ✅ 前端运行时 | 前端 JS 脚本 + manifest.yaml；新增协议免重编译。后端 `protocol_fs.rs` 仅做包管理（列表/读文件/安装 zip/移除） |
+| 协议解析管线 | ✅ 前端引擎 | 字符串/二进制规则全在前端；后端 `protocol.rs` 仍 stub |
+| 协议扩展系统（protocol-ext） | ✅ 前端运行时 | 前端 JS 脚本 + manifest.yaml；新增/修改协议免重编译；内置 Modbus 主从参考实现 + YMODEM 演示包。后端 `protocol_fs.rs` 仅做包管理（列表/读文件/安装 zip/移除） |
 | Framer 接线 | ✅ serial 读路径 | `spawn_reader` 仅用 byte/frame 超时；`delimiter` 恒为 None |
 | 通道数据录制 | ✅ | `recording.rs` DataLogger，CSV/HEX/BIN/TXT → `serial-tools-data/recordings/<channel>` |
 | 命令错误契约 | ✅ | `CommandError` 序列化 `{code,message}`；前端 `errorMessage()` |
@@ -217,11 +217,12 @@ GB2312：UI 已移除；后端若收到 `gb2312` 按 GBK 兼容处理。
 - **协议包** = 目录：`manifest.yaml`（声明式参数/动作/变量表）+ `main.js`（ESM 默认导出）+ 可选 `main.d.ts`。新增/修改协议无需重新编译 Rust。
 - **来源**：builtin（`public/protocols/builtin/`，随包分发）/ user（数据目录 `protocols/`，zip 安装）/ templates（新协议起点）。
 - **ABI 钩子**：`init`（必选）/ `dispose` / `onRx` / `onTick`（~50ms）/ `setConfig` / `match+handle`（从站）/ `runAction` / `getVariables`。
-- **ctx 注入**：`sendHex`（经 `send_data`）、`emitVar`（→ valueBus，ruleId=协议 id）、`log`、`getParam`、`timer`、`utils`。发送只走 `ctx.sendHex`；数值只走 `ctx.emitVar`。
+- **ctx 注入**：`sendHex`（经 `send_data`）、`emitVar`（→ valueBus，ruleId=协议 id）、`log`、`getParam`、`getFile`（读 file 参数字节）/ `saveFile`（二进制落盘 exports/）、`timer`、`utils`（含 `crc16Xmodem`）。发送只走 `ctx.sendHex`；数值只走 `ctx.emitVar`。
+- **file 参数**：值只存元数据 `{name,size,token}`，字节在运行时瞬态缓存，不落工作区；导入/重启后需重选文件。
 - **RX 分发**：rxHub 订阅；从站角色用 `match`/`handle`，其它用 `onRx`。
 - **安全**：zip 安装做路径穿越防护、manifest 校验、剥唯一顶层目录、同/降版本需 force、临时目录解压后原子 rename。
-- **内置参考实现**：Modbus RTU/TCP 主站+从站（可同一通道主从闭环自测）；演示包 `public/protocols/demo/demo-passive.zip`。
-- 测试：后端 `protocol_fs` 单测（14 个，含真实 demo zip 冒烟）；前端 `src/protocol-ext/*.test.ts`。
+- **内置参考实现**：Modbus RTU/TCP 主站+从站（可同一通道主从闭环自测）；演示包 `public/protocols/demo/demo-passive.zip`。YMODEM 文件传输为**手动安装**的演示包（`public/protocols/demo/ymodem.zip`，见 [YMODEM.md](./protocol-ext/YMODEM.md)）。
+- 测试：后端 `protocol_fs` 单测（含真实 demo zip 冒烟）；前端 `src/protocol-ext/*.test.ts`。
 - 能力边界：协议运行在前端进程，**不占用 Rust 侧 I/O**；它只是消费 rxHub 数据 + `send_data` 发送。
 
 ---
@@ -234,10 +235,9 @@ GB2312：UI 已移除；后端若收到 `gb2312` 按 GBK 兼容处理。
 | protocol-multi-view/DESIGN_* | 协议引擎 + 通道多视图设计 |
 | protocol-ext/ | 协议扩展系统（manifest/ABI/编写/模板/排查） |
 | DESIGN-DECISIONS.md | 为何这样选 |
-| COMMUNICATION-ARCH-REFINEMENT.md | 演进路线（含未做项） |
+| COMMUNICATION-ARCH-REFINEMENT.md | 通信层演进设想（含未做项） |
 | ROADMAP.md | 下一步优先级 |
 | requirements.md | 需求（含计划项） |
-| tcp-server-bus-fix/* | 已完成专项验收 |
 
 ## 12. 错误契约与可观测性
 

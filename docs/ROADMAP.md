@@ -15,6 +15,8 @@
 - S4 日志来源枚举化：`LogSource`（序列化契约不变）
 - S5 前端规范化：vendor 分包（vue-vendor/antd/echarts/xterm）
 - 新增：About 页更新检查 / GitHub Issues / gitea 引用清除
+- S8 协议扩展系统（protocol-ext）：前端 JS + manifest 免重编译协议；内置 Modbus 主从 + 演示包；详见 [protocol-ext/](./protocol-ext/README.md)
+- YMODEM 文件传输（file 参数 + ctx.getFile/saveFile + crc16Xmodem，手动安装演示包）
 
 ## 推荐下一阶段（按价值）
 

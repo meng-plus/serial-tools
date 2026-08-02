@@ -1,5 +1,7 @@
 # 通信层架构改进方案
 
+> ⚠️ **历史演进设想**：本文是早期设计的设想蓝图，其中不少形态（async Transport、`Channel`/`ProtocolChannel` trait、独立 crate）**未按此落地**。当前实现以 **sync Transport + std::thread** 为准，见 [ARCHITECTURE.md](./ARCHITECTURE.md) / [DESIGN-DECISIONS.md](./DESIGN-DECISIONS.md)。仅「已落地」小结标记的部分反映现状。
+
 ## 设计目标
 
 1. **统一抽象**：UART/TCP/UDP 使用相同的通道模型

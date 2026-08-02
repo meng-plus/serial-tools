@@ -1,6 +1,6 @@
 # 协议解析与多视图设计
 
-> 状态：已采纳并实施中（Phase UI + A）  
+> 状态：✅ **已实施**（历史设计记录；现状以 [ARCHITECTURE.md](../ARCHITECTURE.md) 为准）  
 > 日期：2026-08-01  
 > 配套：[ARCHITECTURE.md](../ARCHITECTURE.md) · [ROADMAP.md](../ROADMAP.md) · [DESIGN-DECISIONS.md](../DESIGN-DECISIONS.md)
 
