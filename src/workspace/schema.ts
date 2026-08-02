@@ -46,6 +46,7 @@ export type ChecksumAlgo =
   | 'crc8_31'
   | 'crc16_modbus'
   | 'crc16_ccitt_false'
+  | 'crc16_xmodem'
   | 'crc16_ibm'
 
 

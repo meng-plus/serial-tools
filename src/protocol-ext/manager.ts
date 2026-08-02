@@ -437,6 +437,13 @@ export const useProtocolRuntime = defineStore('protocolRuntime', () => {
 function coerceParam(type: string, v: unknown): unknown {
   if (type === 'number') return typeof v === 'number' ? v : Number(v)
   if (type === 'bool') return v === true || v === 'true' || v === 1
+  if (type === 'file') {
+    // 导入的文件参数只保留元数据，字节需重新选择（token 在新会话无效）
+    if (v && typeof v === 'object' && typeof (v as { name?: unknown }).name === 'string') {
+      return { name: (v as { name: string }).name, size: Number((v as { size?: unknown }).size) || 0, token: '' }
+    }
+    return { name: '', size: 0, token: '' }
+  }
   return v
 }
 

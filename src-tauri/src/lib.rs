@@ -62,6 +62,7 @@ pub fn run() {
             // 导出 / 通道实时日志
             commands::fs_util::get_data_dirs,
             commands::fs_util::write_export_file,
+            commands::fs_util::write_binary_export_file,
             commands::fs_util::create_channel_log_file,
             commands::fs_util::append_channel_log,
             commands::fs_util::reveal_in_folder,

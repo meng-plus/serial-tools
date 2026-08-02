@@ -2,6 +2,7 @@
 
 import {
   crc16Modbus,
+  crc16Xmodem,
   appendChecksum,
   computeChecksum,
   verifyFrameChecksum,
@@ -47,6 +48,7 @@ export function buildProtocolUtils(): ProtocolUtils {
     bytesToHex,
     bytesToHexCompact: (bytes: number[]) => bytes.map(b => (b & 0xff).toString(16).padStart(2, '0')).join(''),
     crc16Modbus,
+    crc16Xmodem,
     appendChecksum: appendChecksum as ProtocolUtils['appendChecksum'],
     computeChecksum: computeChecksum as ProtocolUtils['computeChecksum'],
     verifyFrameChecksum: verifyFrameChecksum as ProtocolUtils['verifyFrameChecksum'],

@@ -29,6 +29,7 @@ my-protocol/
 - `modbus-tcp-master` / `modbus-tcp-slave` —— 同上，MBAP 封装
 
 演示包：`public/protocols/demo/demo-passive.zip`（可直接在「协议扩展」页安装体验）。
+YMODEM 文件传输（双向、固件升级/备份）：`public/protocols/demo/ymodem.zip`，见 [YMODEM.md](./YMODEM.md)。
 
 ## 文档导航
 
@@ -38,6 +39,7 @@ my-protocol/
 | [ABI.md](./ABI.md) | 协议实现体（main.js）API：生命周期 / ctx / utils / 变量与数据导出 |
 | [AUTHORING.md](./AUTHORING.md) | 从零写一个协议包的完整流程（被动 / 主站 / 从站） |
 | [TEMPLATES.md](./TEMPLATES.md) | 内置模板说明与复制方法 |
+| [YMODEM.md](./YMODEM.md) | YMODEM 文件传输扩展包：安装 / 使用 / 实现要点 |
 | [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) | 常见问题排查 |
 
 ## 术语

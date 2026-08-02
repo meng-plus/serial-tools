@@ -1,0 +1,74 @@
+id: ymodem
+name: YMODEM 文件传输
+description: 通过 YMODEM 协议下发（PC→设备）或读取（设备→PC）固件/升级文件。内置 CRC16-XMODEM、超时重试与取消。发送需先在参数中选择本地文件。
+version: 1.0.0
+apiVersion: 1
+role: master
+entry: main.js
+channelTypes:
+  - serial
+  - tcp_client
+capabilities:
+  - send
+  - storage
+ui:
+  params:
+    - key: file
+      label: 下发文件（PC→设备时选择）
+      type: file
+      accept: ".bin,.hex,.img,.dat,application/octet-stream"
+    - key: block_size
+      label: 数据块大小
+      type: select
+      default: "1024"
+      options:
+        - { value: "1024", label: "1024 字节 (STX)" }
+        - { value: "128", label: "128 字节 (SOH)" }
+    - key: timeout_ms
+      label: 超时（等待应答）
+      type: number
+      default: 1000
+      min: 200
+      max: 10000
+      step: 100
+    - key: retries
+      label: 单块重试次数
+      type: number
+      default: 10
+      min: 1
+      max: 50
+    - key: save_name
+      label: 接收保存文件名（空=用对端文件名）
+      type: text
+      default: ""
+  actions:
+    - id: start_send
+      label: 开始下发（发送文件）
+    - id: start_recv
+      label: 开始读取（接收文件）
+    - id: cancel
+      label: 取消传输
+  dashboard:
+    - id: progress
+      type: value
+      row: 0
+      col: 0
+      w: 4
+      h: 3
+      title: 进度 %
+      valueIds: [progress]
+    - id: blocks
+      type: value
+      row: 0
+      col: 4
+      w: 4
+      h: 3
+      title: 已收/已发块
+      valueIds: [blocks]
+    - id: status
+      type: text
+      row: 1
+      col: 0
+      w: 8
+      h: 2
+      text: 选择通道并启动实例后，点击「开始下发 / 开始读取」。

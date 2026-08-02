@@ -1,9 +1,10 @@
 /** ProtocolContext 实现：桥接 send_data / valueBus / 日志 / 定时器 */
 
-import { invoke } from '@/api'
+import { invoke, isTauri } from '@/api'
 import { useRxHub } from '@/stores/rxHub'
 import { useValueBus } from '@/stores/valueBus'
 import { hexToBytes } from '@/protocol/frame'
+import { getCachedFile } from './fileCache'
 import type { ValueSample } from '@/protocol/types'
 import type { ProtocolContext } from './types'
 import { buildProtocolUtils } from './utils'
@@ -71,6 +72,26 @@ export function createContext(opts: CreateContextOptions): ProtocolContext {
       else console.warn(`[protocol:${opts.protocolId}]`, msg)
     },
     getParam: (key: string) => opts.getParam(key),
+    getFile(key: string) {
+      const v = opts.getParam(key) as { token?: string } | null | undefined
+      const token = v && typeof v === 'object' ? v.token : undefined
+      if (!token) return null
+      const f = getCachedFile(token)
+      return f ? { name: f.name, bytes: f.bytes } : null
+    },
+    async saveFile(name: string, bytes: number[]) {
+      if (isTauri()) {
+        return invoke<string>('write_binary_export_file', { filename: name, data: bytes })
+      }
+      const blob = new Blob([Uint8Array.from(bytes)])
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = name
+      a.click()
+      URL.revokeObjectURL(url)
+      return `浏览器默认下载目录 / ${name}`
+    },
     timer: {
       setTimeout: (cb, ms) => opts.registerTimer('timeout', cb, ms),
       setInterval: (cb, ms) => opts.registerTimer('interval', cb, ms),

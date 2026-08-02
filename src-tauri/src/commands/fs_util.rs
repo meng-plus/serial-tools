@@ -62,6 +62,47 @@ pub async fn write_export_file(filename: String, content: String) -> Result<Stri
     Ok(path.display().to_string())
 }
 
+/// 写入二进制到 exports/（协议扩展 ctx.saveFile 用），返回绝对路径
+#[tauri::command]
+pub async fn write_binary_export_file(
+    filename: String,
+    data: Vec<u8>,
+) -> Result<String, CommandError> {
+    let dir = data_root().join("exports");
+    write_binary_into(&dir, &filename, &data)
+}
+
+/// 将二进制写入 dir 下（文件名净化），返回绝对路径；便于单测注入目录
+fn write_binary_into(dir: &Path, filename: &str, data: &[u8]) -> Result<String, CommandError> {
+    ensure_dir(dir)?;
+    let path = dir.join(sanitize_filename(filename));
+    std::fs::write(&path, data).map_err(|e| CommandError::Internal(format!("写入失败: {}", e)))?;
+    Ok(path.display().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_filename_cases() {
+        assert_eq!(sanitize_filename("a/b\\c:d?.txt"), "a-b-c-d-.txt");
+        assert_eq!(sanitize_filename("正常中文.bin"), "正常中文.bin");
+        assert_eq!(sanitize_filename("  "), "export.txt");
+        assert_eq!(sanitize_filename("up.bin"), "up.bin");
+    }
+
+    #[test]
+    fn write_binary_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let data: Vec<u8> = (0..=255u8).collect();
+        let path = write_binary_into(dir.path(), "fw.bin", &data).unwrap();
+        assert!(path.ends_with("fw.bin"));
+        let read = std::fs::read(&path).unwrap();
+        assert_eq!(read, data);
+    }
+}
+
 /// 创建 channel-logs/ 下日志文件（可带初始内容），返回绝对路径
 #[tauri::command]
 pub async fn create_channel_log_file(

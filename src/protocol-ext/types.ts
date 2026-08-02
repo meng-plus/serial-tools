@@ -15,6 +15,7 @@ export type ParamType =
   | 'table'
   | 'multiline'
   | 'password'
+  | 'file'
 
 export interface ParamColumnDef {
   key: string
@@ -36,6 +37,15 @@ export interface ParamDef {
   /** table 列定义 */
   columns?: ParamColumnDef[]
   placeholder?: string
+  /** file 参数的文件选择过滤（原生 input accept，如 ".bin,.hex"） */
+  accept?: string
+}
+
+/** file 参数值：仅存元数据，真实字节在运行时瞬态缓存（token 关联） */
+export interface FileParamValue {
+  name: string
+  size: number
+  token: string
 }
 
 export interface VariableDef {
@@ -125,6 +135,15 @@ export interface ProtocolContext {
   emitVar(sample: { valueId: string; value: number; unit?: string; timestamp?: string }): void
   log(level: 'info' | 'warn' | 'error', msg: string): void
   getParam(key: string): unknown
+  /**
+   * 读取 file 参数的真实字节。参数值只存元数据 { name, size, token }，
+   * 这里按 token 从运行时瞬态缓存取回字节；未选择或缓存失效时返回 null。
+   */
+  getFile(key: string): { name: string; bytes: number[] } | null
+  /**
+   * 保存二进制到磁盘（Tauri 写入 exports/ 并返回绝对路径；浏览器触发下载）。
+   */
+  saveFile(name: string, bytes: number[]): Promise<string>
   /** 定时器：dispose 时自动清理 */
   timer: {
     setTimeout(cb: () => void, ms: number): number
@@ -143,6 +162,8 @@ export interface ProtocolUtils {
   bytesToHexCompact(bytes: number[]): string
   /** CRC16-Modbus（小端） */
   crc16Modbus(bytes: number[]): number
+  /** CRC16-XMODEM（poly 0x1021，初值 0x0000），YMODEM 文件传输用 */
+  crc16Xmodem(bytes: number[]): number
   appendChecksum(payload: number[], algo: string, endian?: 'le' | 'be'): number[]
   computeChecksum(algo: string, cover: number[]): number
   verifyFrameChecksum(frame: number[], algo: string, endian?: 'le' | 'be'): boolean

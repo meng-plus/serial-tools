@@ -80,4 +80,21 @@ describe('defaultParams', () => {
     expect(p.byte_order).toBe('be')
     expect(p.poll).toEqual([])
   })
+
+  it('file 参数支持 accept 且默认值为空元数据', () => {
+    const m = parseManifest(`
+id: ymodem
+version: 1.0.0
+role: master
+ui:
+  params:
+    - key: file
+      label: 固件文件
+      type: file
+      accept: ".bin,.hex"
+`)
+    const p = defaultParams(m)
+    expect(m.ui.params?.[0].accept).toBe('.bin,.hex')
+    expect(p.file).toEqual({ name: '', size: 0, token: '' })
+  })
 })

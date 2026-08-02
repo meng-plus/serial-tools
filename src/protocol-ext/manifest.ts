@@ -14,6 +14,7 @@ const PARAM_TYPES = new Set([
   'table',
   'multiline',
   'password',
+  'file',
 ])
 
 export class ManifestError extends Error {
@@ -118,6 +119,7 @@ function normalizeParams(raw: unknown): ProtocolManifest['ui']['params'] {
       }))
     }
     if (typeof item.placeholder === 'string') p.placeholder = item.placeholder
+    if (typeof item.accept === 'string') p.accept = item.accept
     out.push(p)
   }
   return out
@@ -187,6 +189,8 @@ export function defaultParams(manifest: ProtocolManifest): Record<string, unknow
       out[p.key] = []
     } else if (p.type === 'bool') {
       out[p.key] = false
+    } else if (p.type === 'file') {
+      out[p.key] = { name: '', size: 0, token: '' }
     } else if (p.type === 'number') {
       out[p.key] = 0
     } else {

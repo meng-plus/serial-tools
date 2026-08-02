@@ -49,6 +49,31 @@
           :placeholder="p.placeholder"
           @change="(e: Event) => update(p.key, (e.target as HTMLInputElement).value)"
         />
+        <!-- file -->
+        <div v-else-if="p.type === 'file'" class="file-row">
+          <a-button size="small" @click="pickFile(p)">
+            选择文件
+          </a-button>
+          <span v-if="fileMeta(p)?.name" class="file-name" :title="fileMeta(p)?.name">
+            {{ fileMeta(p)?.name }}（{{ fileMeta(p)?.size }} 字节）
+          </span>
+          <a-button
+            v-if="fileMeta(p)?.name"
+            size="small"
+            type="text"
+            danger
+            @click="clearFile(p)"
+          >
+            清除
+          </a-button>
+          <input
+            :ref="el => setInputRef(p.key, el)"
+            type="file"
+            :accept="p.accept || ''"
+            style="display: none"
+            @change="(e: Event) => onFileChange(p, e)"
+          />
+        </div>
         <!-- table -->
         <div v-else-if="p.type === 'table'" class="table-wrap">
           <a-table
@@ -78,6 +103,7 @@
 
 <script setup lang="ts">
 import type { ParamDef } from '@/protocol-ext/types'
+import { cacheFileBytes, dropCachedFile } from '@/protocol-ext/fileCache'
 
 const props = defineProps<{
   params: ParamDef[]
@@ -88,10 +114,45 @@ const emit = defineEmits<{
   (e: 'update:modelValue', v: Record<string, unknown>): void
 }>()
 
+const fileInputs = new Map<string, HTMLInputElement | null>()
+function setInputRef(key: string, el: unknown) {
+  fileInputs.set(key, el as HTMLInputElement | null)
+}
+
+function pickFile(p: ParamDef) {
+  fileInputs.get(p.key)?.click()
+}
+
+function fileMeta(p: ParamDef): { name: string; size: number } | null {
+  const v = props.modelValue[p.key]
+  return v && typeof v === 'object' && typeof (v as { name?: unknown }).name === 'string'
+    ? { name: (v as { name: string }).name, size: Number((v as { size?: unknown }).size) || 0 }
+    : null
+}
+
+async function onFileChange(p: ParamDef, e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  const buf = await file.arrayBuffer()
+  const bytes = Array.from(new Uint8Array(buf))
+  const token = cacheFileBytes(file.name, bytes)
+  update(p.key, { name: file.name, size: file.size, token })
+}
+
+function clearFile(p: ParamDef) {
+  const meta = fileMeta(p)
+  if (meta) {
+    const v = props.modelValue[p.key] as { token?: string } | undefined
+    if (v && typeof v.token === 'string') dropCachedFile(v.token)
+  }
+  update(p.key, { name: '', size: 0, token: '' })
+}
+
 function toText(v: unknown): string {
   return v == null ? '' : String(v)
 }
-
 function toNumber(v: unknown): number {
   const n = Number(v)
   return Number.isNaN(n) ? 0 : n
@@ -139,6 +200,15 @@ function updateCell(p: ParamDef, record: Record<string, unknown>, key: string, v
 .param-row { display: flex; flex-direction: column; gap: 4px; }
 .param-label { font-size: 13px; color: rgba(0, 0, 0, 0.65); }
 .param-control { width: 100%; }
+.file-row { display: flex; align-items: center; gap: 8px; }
+.file-name {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.65);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .table-wrap :deep(.ant-table-cell) { padding: 2px 4px !important; }
 .unsupported { color: rgba(0, 0, 0, 0.35); font-size: 12px; }
 </style>

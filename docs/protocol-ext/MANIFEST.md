@@ -38,12 +38,13 @@ capabilities:
 |--------|------|
 | `key` | 参数名，运行时 `ctx.getParam(key)` 读取 |
 | `label` | 中文标签 |
-| `type` | `number` / `text` / `bool` / `select` / `table` / `multiline` / `password` |
+| `type` | `number` / `text` / `bool` / `select` / `table` / `multiline` / `password` / `file` |
 | `default` | 默认值 |
 | `min/max/step` | number 类型 |
 | `options` | select 选项：`- { value: ..., label: ... }` |
 | `columns` | table 列定义：`- { key, label, type, default }` |
 | `placeholder` | 输入占位 |
+| `accept` | file 类型的原生文件过滤（如 `.bin,.hex`） |
 
 ```yaml
 ui:
@@ -70,6 +71,20 @@ ui:
 ```
 
 > 注意：YAML 不支持流式映射（`{ ... }`）内嵌块级序列。多行 select 选项请使用块级写法（见上方示例），否则解析会失败。
+
+### file 参数
+
+选择本地文件（固件 / 配置等二进制）。运行时用 `ctx.getFile(key)` 读取字节。
+
+```yaml
+- key: firmware
+  label: 升级文件
+  type: file
+  accept: ".bin,.hex"
+```
+
+- 参数值只保存 `{ name, size, token }` 元数据，真实字节在运行时瞬态缓存，**不写入工作区**，重启后需重新选择。
+- `ctx.getFile(key)` 返回 `{ name, bytes }`；未选择或缓存失效返回 `null`，协议需自行提示。
 
 ## ui 变量表（variables，可选）
 

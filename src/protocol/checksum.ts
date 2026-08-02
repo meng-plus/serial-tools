@@ -13,6 +13,7 @@ export type ChecksumAlgo =
   | 'crc8_31'
   | 'crc16_modbus'
   | 'crc16_ccitt_false'
+  | 'crc16_xmodem'
   | 'crc16_ibm'
 
 export interface ChecksumCatalogEntry {
@@ -60,6 +61,13 @@ export const CHECKSUM_CATALOG: ChecksumCatalogEntry[] = [
     size: 2,
     defaultEndian: 'be',
     hint: '常用线序高字节在前；可在发送/规则中改写端序',
+  },
+  {
+    id: 'crc16_xmodem',
+    name: 'CRC16-XMODEM · 默认大端',
+    size: 2,
+    defaultEndian: 'be',
+    hint: '初值 0x0000（YMODEM 文件传输用）；高字节在前',
   },
   {
     id: 'crc16_ibm',
@@ -131,6 +139,19 @@ export function crc16CcittFalse(bytes: number[]): number {
   return crc & 0xffff
 }
 
+/** CRC16-XMODEM：poly 0x1021，初值 0x0000，非反射（YMODEM 文件传输用） */
+export function crc16Xmodem(bytes: number[]): number {
+  let crc = 0
+  for (const b of bytes) {
+    crc ^= (b & 0xff) << 8
+    for (let i = 0; i < 8; i++) {
+      if (crc & 0x8000) crc = ((crc << 1) ^ 0x1021) & 0xffff
+      else crc = (crc << 1) & 0xffff
+    }
+  }
+  return crc & 0xffff
+}
+
 /** CRC16-IBM/ANSI：poly 0x8005 反射为 0xA001，初值 0x0000 */
 export function crc16Ibm(bytes: number[]): number {
   let crc = 0
@@ -164,6 +185,8 @@ export function computeChecksum(algo: ChecksumAlgo, cover: number[]): number {
       return crc16Modbus(cover)
     case 'crc16_ccitt_false':
       return crc16CcittFalse(cover)
+    case 'crc16_xmodem':
+      return crc16Xmodem(cover)
     case 'crc16_ibm':
       return crc16Ibm(cover)
     default:
