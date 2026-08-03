@@ -17,7 +17,10 @@ export function useViewFontSize(
 
   function onWheel(e: WheelEvent) {
     if (!e.ctrlKey) return
+    // 捕获阶段优先处理：阻止默认滚动，并阻断子元素（如 xterm 视口）继续处理，
+    // 否则有数据时内容会先滚动、缩放滞后。
     e.preventDefault()
+    e.stopPropagation()
     const delta = e.deltaY > 0 ? -1 : 1
     setFontSize(fontSize.value + delta)
   }
@@ -26,11 +29,11 @@ export function useViewFontSize(
 
   function attach(node: HTMLElement | null | undefined) {
     if (attached) {
-      attached.removeEventListener('wheel', onWheel)
+      attached.removeEventListener('wheel', onWheel, true)
       attached = null
     }
     if (node) {
-      node.addEventListener('wheel', onWheel, { passive: false })
+      node.addEventListener('wheel', onWheel, { capture: true, passive: false })
       attached = node
     }
   }
