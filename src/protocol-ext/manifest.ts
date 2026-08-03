@@ -5,7 +5,7 @@ import { PROTOCOL_API_VERSION, type DashboardControl, type ProtocolManifest, typ
 
 const ID_RE = /^[a-z0-9_-]+$/
 const ROLES = new Set(['passive', 'master', 'slave'])
-const CONTROL_TYPES = new Set(['value', 'button', 'table', 'chart', 'text'])
+const CONTROL_TYPES = new Set(['value', 'button', 'table', 'chart', 'text', 'register_grid'])
 const PARAM_TYPES = new Set([
   'number',
   'text',
@@ -174,9 +174,36 @@ function normalizeDashboard(raw: unknown): DashboardControl[] {
     if (typeof item.actionId === 'string') c.actionId = item.actionId
     if (isRecord(item.actionParams)) c.actionParams = item.actionParams
     if (typeof item.text === 'string') c.text = item.text
+    if (isRecord(item.grid)) c.grid = normalizeGrid(item.grid)
     out.push(c)
   }
   return out
+}
+
+function normalizeGrid(raw: Record<string, unknown>): NonNullable<DashboardControl['grid']> {
+  const grid: NonNullable<DashboardControl['grid']> = {
+    label: asStr(raw.label, '寄存器'),
+  }
+  if (typeof raw.paramKey === 'string' && raw.paramKey) grid.paramKey = raw.paramKey
+  if (typeof raw.valuePattern === 'string' && raw.valuePattern) grid.valuePattern = raw.valuePattern
+  if (typeof raw.writeAction === 'string' && raw.writeAction) grid.writeAction = raw.writeAction
+  if (isRecord(raw.writeArgs)) {
+    grid.writeArgs = {}
+    for (const [k, v] of Object.entries(raw.writeArgs)) {
+      if (typeof v === 'string') grid.writeArgs[k] = v
+    }
+  }
+  if (typeof raw.editable === 'boolean') grid.editable = raw.editable
+  if (Array.isArray(raw.columns)) {
+    grid.columns = raw.columns
+      .filter(isRecord)
+      .map(c => ({
+        key: asStr(c.key, ''),
+        label: asStr(c.label, asStr(c.key, '')),
+      }))
+      .filter(c => c.key)
+  }
+  return grid
 }
 
 /** 依据 manifest 的 ui.params 生成默认参数值 */

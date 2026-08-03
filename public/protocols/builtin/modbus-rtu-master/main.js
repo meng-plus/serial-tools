@@ -73,6 +73,22 @@ export default {
     return this.ctx.utils.bytesToHex(frame)
   },
 
+  /** FC06 写单寄存器：地址 + 功能码 0x06 + 寄存器(2) + 值(2) + CRC */
+  _packWrite(addr, reg, value) {
+    const v = Math.max(0, Math.min(0xffff, Math.round(Number(value) || 0)))
+    const body = [
+      addr & 0xff,
+      0x06,
+      (reg >> 8) & 0xff,
+      reg & 0xff,
+      (v >> 8) & 0xff,
+      v & 0xff,
+    ]
+    const crc = this.ctx.utils.crc16Modbus(body)
+    const frame = [...body, crc & 0xff, (crc >> 8) & 0xff]
+    return this.ctx.utils.bytesToHex(frame)
+  },
+
   pollOnce() {
     for (const r of this.poll) {
       const addr = Number(r.addr) & 0xff
@@ -165,12 +181,44 @@ export default {
     this.ctx.emitVar({ valueId: `online_${addr}`, value: online ? 1 : 0 })
   },
 
-  runAction(actionId) {
+  runAction(actionId, args = {}) {
     if (actionId === 'read_all') {
       this.pending.clear()
       this.pollOnce()
     } else if (actionId === 'clear_offline') {
       this.online.clear()
+    } else if (actionId === 'write_reg') {
+      this._writeReg(args)
+    }
+  },
+
+  /** 双击写值：FC06 写单寄存器；写后清除该轮询组的 pending，随后读回刷新 */
+  async _writeReg(args = {}) {
+    const addr = Number(args.addr ?? args.device) & 0xff
+    const reg = Number(args.reg ?? args.addr) & 0xffff
+    if (!addr) {
+      this.ctx.log('warn', 'write_reg: 缺少从站地址')
+      return
+    }
+    const value = args.value
+    if (value === undefined || value === '') {
+      this.ctx.log('warn', 'write_reg: 缺少值')
+      return
+    }
+    const hex = this._packWrite(addr, reg, value)
+    try {
+      await this.ctx.sendHex(hex)
+      this.ctx.log('info', `写入从站 ${addr} 寄存器 ${reg} = ${value}`)
+      // 触发一次读回（若该地址在轮询表中）
+      const hit = this.poll.find(
+        r => (Number(r.addr) & 0xff) === addr && reg >= Number(r.start) && reg < Number(r.start) + Math.max(1, Number(r.count) || 1),
+      )
+      if (hit) {
+        this.pending.clear()
+        this.pollOnce()
+      }
+    } catch (err) {
+      this.ctx.log('error', `write_reg 发送失败: ${err && err.message ? err.message : String(err)}`)
     }
   },
 

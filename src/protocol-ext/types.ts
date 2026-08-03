@@ -53,6 +53,8 @@ export interface VariableDef {
   label: string
   unit?: string
   decimals?: number
+  /** 可选：变量绑定的地址（寄存器网格按此定位/排序） */
+  addr?: number
 }
 
 export interface ActionDef {
@@ -61,7 +63,24 @@ export interface ActionDef {
   params?: ParamDef[]
 }
 
-export type ControlType = 'value' | 'button' | 'table' | 'chart' | 'text'
+export type ControlType = 'value' | 'button' | 'table' | 'chart' | 'text' | 'register_grid'
+
+/** 寄存器网格控件声明：行结构 + 实时值模式 + 双击写值映射（通用，不限定 Modbus） */
+export interface RegisterGridDef {
+  label: string
+  /** 行结构来自哪个 table 参数（如从站 registers / 主站 poll）；缺省则用实例 variables */
+  paramKey?: string
+  /** 每行实时值变量 key 模式，支持 {addr} 占位，如 "reg_{addr}" */
+  valuePattern?: string
+  /** 覆盖列定义（key 取值：name/addr/value/unit 或参数表列 key+value） */
+  columns?: { key: string; label: string }[]
+  /** 双击写值 / 编辑触发的 runAction id */
+  writeAction?: string
+  /** 动作参数映射：{addr}/{value}/{row.*} 占位替换为实际值 */
+  writeArgs?: Record<string, string>
+  /** 是否允许双击写值 / 编辑 */
+  editable?: boolean
+}
 
 export interface DashboardControl {
   id: string
@@ -77,6 +96,8 @@ export interface DashboardControl {
   actionId?: string
   actionParams?: Record<string, unknown>
   text?: string
+  /** register_grid 专用声明 */
+  grid?: RegisterGridDef
 }
 
 export interface ProtocolManifest {

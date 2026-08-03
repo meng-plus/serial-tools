@@ -11,6 +11,7 @@ const VIEW_TITLES: Record<ViewType, string> = {
   chat: '对话',
   vt100: 'VT100',
   protocol_dashboard: '协议仪表盘',
+  protocol_panel: '协议实例',
 }
 
 let viewSeq = 0
@@ -190,7 +191,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         ? { valueIds: [] as string[], maxPoints: 100, ...config }
         : type === 'protocol_dashboard'
           ? { instanceId: '', controls: [] as unknown[], ...config }
-          : { ...config }
+          : type === 'protocol_panel'
+            ? { instanceId: String(config.instanceId || ''), ...config }
+            : { ...config }
     const view: ViewInstance = {
       id: `view-${++viewSeq}`,
       type,
@@ -280,6 +283,41 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (hadTxList) openTxPanel(channelId)
   }
 
+  /**
+   * 为通道中尚无面板的协议实例自动补齐 protocol_panel 视图（升级/建实例后自动出面板）。
+   * instanceIds 为当前通道存在实例的 id 列表。
+   */
+  function ensureProtocolPanels(channelId: string, instanceIds: string[]) {
+    if (!channelId || instanceIds.length === 0) return
+    let list = viewsByChannel.value[channelId]
+    if (!list) {
+      ensureChannel(channelId)
+      list = viewsByChannel.value[channelId]
+    }
+    const existing = new Set(
+      (list || [])
+        .filter(v => v.type === 'protocol_panel')
+        .map(v => String(v.config?.instanceId || '')),
+    )
+    let changed = false
+    let next = [...(list || [])]
+    for (const instanceId of instanceIds) {
+      if (existing.has(instanceId)) continue
+      const view: ViewInstance = {
+        id: `view-${++viewSeq}`,
+        type: 'protocol_panel',
+        channelId,
+        title: VIEW_TITLES.protocol_panel,
+        config: { instanceId },
+      }
+      next.push(view)
+      changed = true
+    }
+    if (changed) {
+      viewsByChannel.value = { ...viewsByChannel.value, [channelId]: next }
+    }
+  }
+
   return {
     activeChannelId,
     viewsByChannel,
@@ -291,6 +329,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     exitViewImmersive,
     openChannel,
     ensureChannel,
+    ensureProtocolPanels,
     addView,
     closeView,
     removeChannel,

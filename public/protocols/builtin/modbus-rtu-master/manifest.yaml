@@ -54,3 +54,20 @@ ui:
       label: 立即读取一轮
     - id: clear_offline
       label: 清除离线标记
+    - id: write_reg
+      label: 写单寄存器
+      params:
+        - key: addr
+          label: 从站地址
+          type: number
+          default: 1
+        - key: reg
+          label: 寄存器地址
+          type: number
+          default: 0
+        - key: value
+          label: 值
+          type: number
+          default: 0
+  dashboard:
+    - { id: d1, type: register_grid, row: 0, col: 0, w: 12, h: 8, title: 轮询寄存器, grid: { label: 轮询寄存器, paramKey: poll, valuePattern: "{name}_{addr}", editable: true, writeAction: write_reg, writeArgs: { addr: "{device}", reg: "{addr}", value: "{value}" } } }

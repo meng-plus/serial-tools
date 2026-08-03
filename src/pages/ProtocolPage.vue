@@ -248,7 +248,7 @@
 <script setup lang="ts">
 import { ref, computed, reactive, watch } from 'vue'
 import { message, Modal } from 'ant-design-vue'
-import { useConnectionStore, useProtocolRuntime } from '@/stores'
+import { useConnectionStore, useProtocolRuntime, useWorkspaceStore } from '@/stores'
 import { errorMessage } from '@/utils/error'
 import { exportTextToDisk, revealPath } from '@/utils/diskLog'
 import { invoke, isTauri } from '@/api'
@@ -259,6 +259,7 @@ import type { ProtocolInstance } from '@/protocol-ext/types'
 
 const runtime = useProtocolRuntime()
 const connectionStore = useConnectionStore()
+const workspaceStore = useWorkspaceStore()
 
 const channels = computed(() => connectionStore.channelList)
 const instances = computed(() => runtime.instances)
@@ -465,7 +466,10 @@ async function handleWizardOk() {
   try {
     const inst = await runtime.createInstance(wizard.protocolId, wizard.channelId, wizard.params)
     await runtime.setParams(inst.instanceId, wizard.params)
-    message.success('已创建协议实例，可在上方标签页启动')
+    // 自动在该通道工作区带出一个实例面板视图
+    workspaceStore.addView(wizard.channelId, 'protocol_panel', { instanceId: inst.instanceId })
+    workspaceStore.ensureProtocolPanels(wizard.channelId, [inst.instanceId])
+    message.success('已创建协议实例，可在通道工作区面板查看与操作')
     wizardOpen.value = false
     wizardStep.value = 0
   } catch (e) {

@@ -31,6 +31,39 @@ export default {
     if (patch) this.ctx.log('info', `参数已更新: ${Object.keys(patch).join(', ')}`)
   },
 
+  /** 面板双击编辑：直接改内存值并推送；kind 支持 coil / reg */
+  runAction(actionId, args = {}) {
+    if (actionId !== 'set_value') {
+      this.ctx.log('warn', `未实现的动作 ${actionId}`)
+      return
+    }
+    const kind = args.kind === 'coil' ? 'coil' : 'reg'
+    const addr = Number(args.addr ?? args.reg) & 0xffff
+    const raw = args.value
+    if (addr === undefined || raw === undefined || raw === '') {
+      this.ctx.log('warn', 'set_value: 缺少地址或值')
+      return
+    }
+    const value = Number(raw)
+    if (!Number.isFinite(value)) {
+      this.ctx.log('warn', `set_value: 非法数值 ${raw}`)
+      return
+    }
+    if (kind === 'coil') {
+      this._setCoil(addr, value ? 1 : 0)
+      this._emitCoils(addr, 1)
+      this.ctx.log('info', `面板改线圈 ${addr} = ${value ? 1 : 0}`)
+    } else {
+      if (addr > this.maxReg) {
+        this.ctx.log('warn', `set_value: 寄存器地址 ${addr} 超出配置范围`)
+        return
+      }
+      this._setReg(addr, value)
+      this._emitRegs(addr, 1)
+      this.ctx.log('info', `面板改寄存器 ${addr} = ${value}`)
+    }
+  },
+
   _applyConfig() {
     this.addr = Number(this.ctx.getParam('addr')) & 0xff || 1
     this.le = this.ctx.getParam('byte_order') === 'le'

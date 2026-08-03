@@ -111,6 +111,7 @@ export type ViewType =
   | 'chat'
   | 'vt100'
   | 'protocol_dashboard'
+  | 'protocol_panel'
 
 export interface ViewInstance {
   id: string

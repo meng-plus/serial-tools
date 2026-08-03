@@ -41,3 +41,9 @@ ui:
       options:
         - { value: be, label: 大端（高字节在前） }
         - { value: le, label: 小端（低字节在前） }
+  actions:
+    - id: set_value
+      label: 修改寄存器值
+  dashboard:
+    - { id: s1, type: register_grid, row: 0, col: 0, w: 6, h: 6, title: 线圈, grid: { label: 线圈, paramKey: coils, valuePattern: "coil_{addr}", editable: true, writeAction: set_value, writeArgs: { kind: coil, addr: "{addr}", value: "{value}" } } }
+    - { id: s2, type: register_grid, row: 0, col: 6, w: 6, h: 6, title: 保持寄存器, grid: { label: 保持寄存器, paramKey: registers, valuePattern: "reg_{addr}", editable: true, writeAction: set_value, writeArgs: { kind: reg, addr: "{addr}", value: "{value}" } } }

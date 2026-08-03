@@ -55,6 +55,7 @@
               <a-menu-item key="chat">对话</a-menu-item>
               <a-menu-item key="vt100">VT100 终端</a-menu-item>
               <a-menu-item key="protocol_dashboard">协议仪表盘</a-menu-item>
+              <a-menu-item key="protocol_panel">协议实例</a-menu-item>
             </a-menu>
           </template>
         </a-dropdown>
@@ -95,6 +96,11 @@
                 <Vt100View v-else-if="v.type === 'vt100'" :channel-id="channelId" :view-id="v.id" />
                 <ProtocolDashboardView
                   v-else-if="v.type === 'protocol_dashboard'"
+                  :channel-id="channelId"
+                  :view-id="v.id"
+                />
+                <ProtocolPanelView
+                  v-else-if="v.type === 'protocol_panel'"
                   :channel-id="channelId"
                   :view-id="v.id"
                 />
@@ -163,11 +169,12 @@ import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { invoke } from '@/api'
 import {
-  useConnectionStore,
-  useWorkspaceStore,
-  TX_PANEL_WIDTH_MIN,
-  TX_PANEL_WIDTH_MAX,
-} from '@/stores'
+useConnectionStore,
+      useWorkspaceStore,
+      useProtocolRuntime,
+      TX_PANEL_WIDTH_MIN,
+      TX_PANEL_WIDTH_MAX,
+    } from '@/stores'
 import { errorMessage } from '@/utils/error'
 import type { ViewType } from '@/protocol/types'
 import {
@@ -183,11 +190,13 @@ import TxListView from '@/views/TxListView.vue'
 import ChatView from '@/views/ChatView.vue'
 import Vt100View from '@/views/Vt100View.vue'
 import ProtocolDashboardView from '@/views/ProtocolDashboardView.vue'
+import ProtocolPanelView from '@/views/ProtocolPanelView.vue'
 
 const route = useRoute()
 const router = useRouter()
 const connectionStore = useConnectionStore()
 const workspace = useWorkspaceStore()
+const protocolRuntime = useProtocolRuntime()
 
 const channelId = computed(() => String(route.params.channelId || ''))
 
@@ -241,6 +250,9 @@ watch(
       return
     }
     workspace.openChannel(id)
+    // 为该通道已存在但尚无面板的协议实例自动补齐面板视图
+    const instIds = protocolRuntime.instances.filter(i => i.channelId === id).map(i => i.instanceId)
+    workspace.ensureProtocolPanels(id, instIds)
     loadTimeoutForChannel(id)
   },
   { immediate: true }
