@@ -341,6 +341,11 @@ const CRC_DEFAULT_ENDIAN: Record<CrcAlgoName, 'le' | 'be'> = {
 const TOKEN_RE =
   /\{\{(?:(channel\.)?seq(?::(u8|u16le|u16be))?|time:(unix|ms|YYYYMMDD|HHmmss)|rand:(\d+)|crc(8_31|16_ccitt|16_xmodem|16_ibm|8|16)|sum(8|16)|xor(8))(?::(hex|dec|le|be))?\}\}/g
 
+// 仅校验 token（crc/sum/xor）：第二遍计算 CRC 基数时将其整体剔除，
+// 保证校验字段不参与自身计算。
+const CHECKSUM_TOKEN_RE =
+  /\{\{(?:crc(?:8_31|16_ccitt|16_xmodem|16_ibm|8|16)|sum(?:8|16)|xor(?:8))(?::(?:hex|dec|le|be))?\}\}/g
+
 /**
  * 展开 payload 中的变量；不修改序号（由调用方在发送成功后自增）。
  * CRC 变量基于展开后的完整内容计算（两遍处理）。
@@ -389,10 +394,12 @@ export function expandTxPayload(payload: string, ctx: ExpandCtx): ExpandResult {
   )
 
   // ── 第二遍：计算 CRC 并替换 ──────────────────────────────
-  // 将展开后的内容转为字节（用于 CRC 计算）
+  // 校验字段不覆盖自身：先将展开结果中的校验 token 剔除，再取字节作为 CRC 基数。
+  // 否则字面 token（如 {{crc16}}）会被 hexToBytes 剥出 c/1/6 等垃圾字节污染基数。
+  const crcBaseStr = afterNonCrc.replace(CHECKSUM_TOKEN_RE, '')
   const contentBytes = ctx.format === 'hex'
-    ? hexToBytes(afterNonCrc)
-    : Array.from(new TextEncoder().encode(afterNonCrc))
+    ? hexToBytes(crcBaseStr)
+    : Array.from(new TextEncoder().encode(crcBaseStr))
 
   const out = afterNonCrc.replace(
     TOKEN_RE,
@@ -455,15 +462,10 @@ function formatCrcValue(
   const hi = (value >>> 8) & 0xff
 
   if (fmt === 'dec') return String(value & 0xffff)
-  if (fmt === 'hex') {
-    // 默认跟随 payload 格式
-    if (payloadFormat === 'hex') return toHexWithSpace([hi, lo]) // 默认大端显示
-    return String(value & 0xffff)
-  }
   if (fmt === 'le') return toHexWithSpace([lo, hi])
   if (fmt === 'be') return toHexWithSpace([hi, lo])
 
-  // 默认：hex 格式用小端，其他用字符串
+  // fmt === 'hex'（显式或默认）：hex 输出，端序跟随算法默认
   if (payloadFormat === 'hex') {
     return defaultEndian === 'le' ? toHexWithSpace([lo, hi]) : toHexWithSpace([hi, lo])
   }
@@ -482,17 +484,14 @@ export function previewTxPayload(payload: string, ctx: ExpandCtx): string {
 export function checkHexCompatibility(payload: string): { compatible: boolean; incompatibleTokens: string[] } {
   const incompatible: string[] = []
 
-  // 提取所有 CRC 变量的格式
-  const crcRe = /\{\{crc(?::\w+)?(?::(?:hex|dec|le|be))?\}\}/g
+  // 匹配所有校验 token，并捕获可选的 :fmt 后缀
+  const checksumRe =
+    /\{\{(?:crc(?:8_31|16_ccitt|16_xmodem|16_ibm|8|16)|sum(?:8|16)|xor(?:8))(?::(hex|dec|le|be))?\}\}/g
   let match: RegExpExecArray | null
-  while ((match = crcRe.exec(payload)) !== null) {
-    const token = match[0]
-    // 检查格式修饰符
-    const fmtMatch = token.match(/::(hex|dec|le|be)$/)
-    if (fmtMatch && fmtMatch[1] === 'dec') {
-      // dec 格式会产生十进制字符串，可能包含非 hex 字符（虽然数字是安全的）
-      // 但为了明确提示，仍然标记
-      incompatible.push(token)
+  while ((match = checksumRe.exec(payload)) !== null) {
+    // :dec 会输出十进制字符串（多位 ASCII 数字），在 HEX 载荷中语义模糊，标记警告
+    if (match[1] === 'dec') {
+      incompatible.push(match[0])
     }
   }
 
