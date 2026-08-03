@@ -31,7 +31,25 @@
             :key="'ch:' + ch.channelId"
           >
             <template #icon><ApiOutlined /></template>
-            <span class="channel-menu-label">{{ channelMenuLabel(ch) }}</span>
+            <input
+              v-if="renamingChannelId === ch.channelId"
+              ref="renameInputRef"
+              class="channel-rename-input"
+              :value="renamingDraft"
+              @click.stop
+              @dblclick.stop
+              @mousedown.stop
+              @input="renamingDraft = ($event.target as HTMLInputElement).value"
+              @keydown.enter.prevent="commitRename(ch)"
+              @keydown.esc.prevent="cancelRename"
+              @blur="commitRename(ch)"
+            />
+            <span
+              v-else
+              class="channel-menu-label"
+              :title="channelTitle(ch)"
+              @dblclick.stop.prevent="startRename(ch)"
+            >{{ connectionStore.channelDisplayName(ch) }}</span>
           </a-menu-item>
           <a-menu-item v-if="connectedChannels.length === 0" key="connection" disabled>
             <span style="opacity:0.55">暂无连接</span>
@@ -54,7 +72,7 @@
           <div class="header-right">
             <a-space>
               <a-tag v-for="ch in connectedChannels" :key="ch.channelId" color="success" closable @close="handleDisconnectChannel(ch.channelId)">
-                {{ ch.transportType === 'serial' ? ch.portName : ch.channelId }}
+                {{ connectionStore.channelDisplayName(ch) }}
               </a-tag>
               <a-tag v-if="connectedChannels.length === 0" color="default">未连接</a-tag>
             </a-space>
@@ -83,7 +101,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import zhCN from 'ant-design-vue/es/locale/zh_CN'
 import {
@@ -112,6 +130,9 @@ const workspaceStore = useWorkspaceStore()
 const protocolRuntime = useProtocolRuntime()
 
 const collapsed = ref(false)
+const renamingChannelId = ref('')
+const renamingDraft = ref('')
+const renameInputRef = ref<HTMLInputElement | HTMLInputElement[] | null>(null)
 
 const globalMenuItems = [
   { key: 'connection', label: '连接管理', icon: LinkOutlined },
@@ -134,20 +155,49 @@ const pageTitle = computed(() => {
   if (route.name === 'workspace') {
     const id = String(route.params.channelId || '')
     const ch = connectionStore.channelList.find(c => c.channelId === id)
-    return ch ? `通道 · ${ch.portName || id}` : '通道工作区'
+    return ch ? `通道 · ${connectionStore.channelDisplayName(ch)}` : '通道工作区'
   }
   return (route.meta?.title as string) || ''
 })
 
 const connectedChannels = computed(() => connectionStore.connectedChannels)
 
-function channelMenuLabel(ch: ChannelInfo) {
-  if (ch.transportType === 'serial') return ch.portName || ch.channelId
-  if (ch.transportType === 'tcp_server_client') return `Client ${ch.portName}`
-  return ch.portName || ch.channelId
+function channelTitle(ch: ChannelInfo) {
+  const base = ch.portName || ch.channelId
+  return ch.alias?.trim() ? `${ch.alias.trim()}（${base}）` : base
+}
+
+function focusRenameInput() {
+  nextTick(() => {
+    const el = renameInputRef.value
+    const input = Array.isArray(el) ? el[0] : el
+    input?.focus()
+    input?.select()
+  })
+}
+
+function startRename(ch: ChannelInfo) {
+  renamingChannelId.value = ch.channelId
+  renamingDraft.value = connectionStore.channelDisplayName(ch)
+  focusRenameInput()
+}
+
+function cancelRename() {
+  renamingChannelId.value = ''
+  renamingDraft.value = ''
+}
+
+function commitRename(ch: ChannelInfo) {
+  if (renamingChannelId.value !== ch.channelId) return
+  const draft = renamingDraft.value.trim()
+  const defaultName = connectionStore.channelBaseName(ch)
+  // 清空或与默认名相同 → 清除别名
+  connectionStore.setChannelAlias(ch.channelId, draft === defaultName ? '' : draft)
+  cancelRename()
 }
 
 function handleMenuClick(info: { key: string }) {
+  if (renamingChannelId.value) return
   const key = String(info.key)
   if (key.startsWith('ch:')) {
     const channelId = key.slice(3)
@@ -312,6 +362,20 @@ onUnmounted(() => {
   display: inline-block;
   max-width: 140px;
   vertical-align: bottom;
+}
+
+.channel-rename-input {
+  width: min(160px, 100%);
+  max-width: 160px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid #1677ff;
+  border-radius: 4px;
+  background: #fff;
+  color: rgba(0, 0, 0, 0.88);
+  font-size: 13px;
+  outline: none;
+  vertical-align: middle;
 }
 </style>
 

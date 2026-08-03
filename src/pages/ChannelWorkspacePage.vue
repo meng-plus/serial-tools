@@ -87,7 +87,7 @@
                 </a-button>
               </div>
               <div class="view-content">
-                <TerminalView v-if="v.type === 'terminal'" :channel-id="channelId" />
+                <TerminalView v-if="v.type === 'terminal'" :channel-id="channelId" :view-id="v.id" />
                 <ParsedLogView v-else-if="v.type === 'parsed_log'" :channel-id="channelId" />
                 <MonitorView v-else-if="v.type === 'monitor'" :channel-id="channelId" />
                 <ChartView v-else-if="v.type === 'chart'" :channel-id="channelId" :view-id="v.id" />
@@ -196,7 +196,9 @@ const channelMeta = computed(() =>
 )
 
 const channelLabel = computed(() =>
-  channelMeta.value?.portName || channelId.value || '未选择通道'
+  channelMeta.value
+    ? connectionStore.channelDisplayName(channelMeta.value)
+    : (channelId.value || '未选择通道')
 )
 
 const txPanel = computed(() => workspace.getTxPanel(channelId.value))

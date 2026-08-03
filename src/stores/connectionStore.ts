@@ -11,6 +11,29 @@ export interface ChannelInfo {
   portName: string
   clients: string[]
   parentChannelId?: string
+  /** 用户自定义别名；空则回退到 portName / channelId */
+  alias?: string
+}
+
+const ALIAS_STORAGE_KEY = 'serial-tools-channel-aliases'
+
+function loadAliasMap(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(ALIAS_STORAGE_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    const out: Record<string, string> = {}
+    for (const [k, v] of Object.entries(parsed)) {
+      if (typeof v === 'string' && v.trim()) out[k] = v.trim()
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+function saveAliasMap(map: Record<string, string>) {
+  localStorage.setItem(ALIAS_STORAGE_KEY, JSON.stringify(map))
 }
 
 export interface PortInfo {
@@ -31,6 +54,7 @@ function toChannelMap(list: ChannelInfo[]): Map<string, ChannelInfo> {
 export const useConnectionStore = defineStore('connection', () => {
   const channelList = ref<ChannelInfo[]>([])
   const ports = ref<PortInfo[]>([])
+  const aliasByChannelId = ref<Record<string, string>>(loadAliasMap())
 
   const channels = computed(() => toChannelMap(channelList.value))
   const connectedChannels = computed(() => channelList.value.filter(c => c.connected))
@@ -42,18 +66,55 @@ export const useConnectionStore = defineStore('connection', () => {
     channelList.value.filter(c => c.transportType !== 'tcp_server_client')
   )
 
+  function attachAlias(info: ChannelInfo): ChannelInfo {
+    const alias = aliasByChannelId.value[info.channelId]
+    return alias ? { ...info, alias } : { ...info, alias: undefined }
+  }
+
+  /** 无别名时的默认显示名 */
+  function channelBaseName(ch: ChannelInfo): string {
+    if (ch.transportType === 'tcp_server_client') return `Client ${ch.portName}`
+    if (ch.transportType === 'serial') return ch.portName || ch.channelId
+    return ch.portName || ch.channelId
+  }
+
+  /** 侧栏/标题用显示名：别名优先 */
+  function channelDisplayName(ch: ChannelInfo): string {
+    if (ch.alias?.trim()) return ch.alias.trim()
+    return channelBaseName(ch)
+  }
+
+  function setChannelAlias(channelId: string, alias: string) {
+    const trimmed = alias.trim()
+    const next = { ...aliasByChannelId.value }
+    if (trimmed) next[channelId] = trimmed
+    else delete next[channelId]
+    aliasByChannelId.value = next
+    saveAliasMap(next)
+    const idx = channelList.value.findIndex(c => c.channelId === channelId)
+    if (idx >= 0) {
+      const cur = channelList.value[idx]
+      channelList.value.splice(idx, 1, {
+        ...cur,
+        alias: trimmed || undefined,
+      })
+    }
+  }
+
   function upsertChannel(info: ChannelInfo) {
-    const idx = channelList.value.findIndex(c => c.channelId === info.channelId)
+    const merged = attachAlias(info)
+    const idx = channelList.value.findIndex(c => c.channelId === merged.channelId)
     if (idx >= 0) {
       const prev = channelList.value[idx]
       channelList.value.splice(idx, 1, {
         ...prev,
-        ...info,
-        clients: info.clients?.length ? info.clients : (info.clients === undefined ? prev.clients : info.clients),
-        parentChannelId: info.parentChannelId ?? prev.parentChannelId,
+        ...merged,
+        clients: merged.clients?.length ? merged.clients : (merged.clients === undefined ? prev.clients : merged.clients),
+        parentChannelId: merged.parentChannelId ?? prev.parentChannelId,
+        alias: merged.alias ?? prev.alias,
       })
     } else {
-      channelList.value.push(info)
+      channelList.value.push(merged)
     }
   }
 
@@ -75,23 +136,23 @@ export const useConnectionStore = defineStore('connection', () => {
     for (const addr of clients) {
       const id = `tcp_client-${addr}`
       if (!channelList.value.some(c => c.channelId === id)) {
-        channelList.value.push({
+        channelList.value.push(attachAlias({
           channelId: id,
           connected: true,
           transportType: 'tcp_server_client',
           portName: addr,
           clients: [],
           parentChannelId: serverChannelId,
-        })
+        }))
       } else {
         const cidx = channelList.value.findIndex(c => c.channelId === id)
         if (cidx >= 0) {
           const c = channelList.value[cidx]
-          channelList.value.splice(cidx, 1, {
+          channelList.value.splice(cidx, 1, attachAlias({
             ...c,
             connected: true,
             parentChannelId: c.parentChannelId || serverChannelId,
-          })
+          }))
         }
       }
     }
@@ -256,14 +317,14 @@ export const useConnectionStore = defineStore('connection', () => {
     const prev = toChannelMap(channelList.value)
     const next: ChannelInfo[] = status.map(s => {
       const existing = prev.get(s.channel_id)
-      return {
+      return attachAlias({
         channelId: s.channel_id,
         connected: s.connected,
         transportType: s.transport_type || existing?.transportType || '',
         portName: s.port_name,
         clients: s.clients || [],
         parentChannelId: s.parent_channel_id || existing?.parentChannelId,
-      }
+      })
     })
 
     for (const ch of next) {
@@ -286,7 +347,7 @@ export const useConnectionStore = defineStore('connection', () => {
 
   return {
     channels, channelList, ports, connectedChannels, hasConnection, serverChannels, topLevelChannels,
-    getServerClients,
+    getServerClients, channelBaseName, channelDisplayName, setChannelAlias,
     init, dispose, connect, disconnect, disconnectClient, disconnectAll,
     listServerClients, refreshStatus, loadPorts,
   }

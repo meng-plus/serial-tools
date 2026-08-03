@@ -15,9 +15,20 @@
             <template v-if="form.conn_type === 'serial'">
               <a-form-item label="串口">
                 <a-space>
-                  <a-select v-model:value="form.port" style="width: 260px" placeholder="选择串口" show-search>
-                    <a-select-option v-for="p in ports" :key="p.name" :value="p.name">
-                      {{ p.name }} — {{ p.description }}
+                  <a-select
+                    v-model:value="form.port"
+                    style="width: 360px"
+                    placeholder="选择串口"
+                    show-search
+                    :filter-option="filterPortOption"
+                  >
+                    <a-select-option
+                      v-for="p in ports"
+                      :key="p.name"
+                      :value="p.name"
+                      :title="portFullLabel(p)"
+                    >
+                      {{ portFullLabel(p) }}
                     </a-select-option>
                   </a-select>
                   <a-button @click="connectionStore.loadPorts()">
@@ -119,7 +130,7 @@
                 <a-tag v-if="ch.transportType === 'tcp_server'">TCP 服务端</a-tag>
                 <a-tag v-else>{{ typeLabels[ch.transportType] || ch.transportType }}</a-tag>
                 <span class="channel-id">{{ ch.channelId }}</span>
-                <span class="channel-addr">{{ ch.portName }}</span>
+                <span class="channel-addr">{{ connectionStore.channelDisplayName(ch) }}{{ ch.alias ? ` · ${ch.portName}` : '' }}</span>
                 <template v-if="ch.transportType === 'tcp_server'">
                   <a-badge status="success" />
                   <span>监听中</span>
@@ -175,6 +186,8 @@ import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { ReloadOutlined } from '@ant-design/icons-vue'
 import { useConnectionStore } from '@/stores'
+import type { PortInfo } from '@/stores/connectionStore'
+import { portFullLabel as formatPortFullLabel, portDisplayName } from '@/utils/portLabel'
 import { errorMessage } from '@/utils/error'
 import { loadAppSettings, saveChannelTimeout } from '@/utils/appSettings'
 
@@ -199,6 +212,23 @@ const typeLabels: Record<string, string> = {
 function clientCount(ch: { channelId: string; clients?: string[] }) {
   const nested = connectionStore.getServerClients(ch.channelId).length
   return nested || ch.clients?.length || 0
+}
+
+function portFullLabel(p: PortInfo) {
+  return formatPortFullLabel(p.name, p.description)
+}
+
+function filterPortOption(input: string, option: { value?: string }) {
+  const q = input.trim().toLowerCase()
+  if (!q) return true
+  const p = ports.value.find(x => x.name === option.value)
+  if (!p) return false
+  const short = portDisplayName(p.description).toLowerCase()
+  return (
+    p.name.toLowerCase().includes(q) ||
+    short.includes(q) ||
+    (p.description || '').toLowerCase().includes(q)
+  )
 }
 
 function loadSavedForm() {

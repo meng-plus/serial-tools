@@ -16,6 +16,10 @@ pub struct RxEventPayload {
     pub hex: String,
     pub text: String,
     pub timestamp: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timestamp_end: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
     pub seq: u64,
 }
 
@@ -45,6 +49,8 @@ pub fn start_event_bridge(app: AppHandle, rx_sender: broadcast::Sender<RxBroadca
                         bytes_hex: hex_str,
                         text: String::from_utf8_lossy(&event.bytes).to_string(),
                         timestamp: event.timestamp,
+                        timestamp_end: event.timestamp_end,
+                        duration_ms: event.duration_ms,
                         seq: event.seq,
                     };
                     if let Err(e) = app.emit("rx-data", payload) {

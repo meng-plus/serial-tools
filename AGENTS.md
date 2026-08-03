@@ -33,11 +33,13 @@ Cargo workspace：`crates/transport` + `src-tauri`；前端在 `src/`。
 - 编码：GBK 发送经后端 `encoding_rs`；显示在前端用 `TextDecoder('gbk')` / hex。
 - 协议解析引擎**仅在前端**（`src/protocol/`）；后端 `commands/protocol.rs` 是返回空列表的 stub。
 - 超时分帧（`crates/transport/src/framer.rs`）**已接入串口读路径** — `src-tauri/src/state.rs` 的 `spawn_reader` 为 `serial` 通道创建 `Framer` 并喂入读取数据（只用 `byte_timeout`/`frame_timeout`；`delimiter` 恒为 `None`）。MQTT 传输是 stub；不要把它当已交付能力。
-- 工作区/会话持久化为 YAML（js-yaml），经 `src/workspace/io.ts` + `schema.ts`（`kind: workspace_package`，`WORKSPACE_VERSION` 1；导入时兼容旧版 `rules_session`）。
+- 工作区/会话持久化为 YAML（js-yaml），经 `src/workspace/io.ts` + `schema.ts`（`kind: workspace_package`，`WORKSPACE_VERSION` 2；含 `protocolInstances`。导入时兼容旧版 `rules_session`）。新字段须加到 `normalizeTxItem` / `normalizeProtocolInstance` 里，否则 IO 测试丢字段。
+- 定时发送：每条独立定时器（`txPlannerStore`）；内容里的变量（`{{seq}}` / `{{crc16:le}}` / `{{time:ms}}` 等）经 `src/protocol/txVars.ts` 展开——`TX_VAR_CATALOG` 是单一真相源（UI 说明 Drawer 直接渲染）。**变量语法是 `{{crc8}}` 无冒号（不是 `crc:8`）**；`expandTxPayload` 两遍处理：先展开非校验变量、再基于整帧算 CRC。HEX 追加校验以覆盖区间见 `sendPipeline.ts`。
+- 协议扩展系统（protocol-ext）：运行时代码**全在前端**（`src/protocol-ext/`，pinia `useProtocolRuntime`）；协议包 = `manifest.yaml` + `main.js`（ESM 默认导出），改协议免重编译 Rust。`loadModuleFromSource` 用新 Blob URL 避免缓存。后端 `commands/protocol_fs.rs` 只做包管理（list/read/install zip/remove），不做解析。内置 `BUILTIN_PROTOCOL_IDS`（`loader.ts`）登记 4 个 Modbus 主/从。协议发送只走 `ctx.sendHex`，数值只走 `ctx.emitVar`；收发分开订阅 rxHub（方向 `'rx'`），防自应答死循环。
 
 ## 约定
 
-- 不要在 UI/产品文案中宣称未实现的能力：UDP、日志导出（BIN/CSV）、完整 Modbus、后端协议解析均**未交付**（见 `docs/ARCHITECTURE.md` §0）。
+- 不要在 UI/产品文案中宣称未实现的能力：UDP、MQTT、日志导出（BIN/CSV）、后端协议解析均**未交付**（见 `docs/ARCHITECTURE.md` §0）。协议扩展系统（protocol-ext）已交付 Modbus RTU/TCP 主/从**参考实现**，但不是产品级 Modbus（`crc16_modbus` 只是算法名）——勿在文案里与专用 Modbus 工具（Modbus Poll/Slave）混淆。
 - 新增 Rust 依赖放进根 `Cargo.toml` 的 `[workspace.dependencies]`。
 - Vitest 测试是纯 Node（无 jsdom）——不要写依赖 DOM 的前端测试。
 

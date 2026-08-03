@@ -2,7 +2,7 @@
   <div ref="rootRef" class="io-log-view" :style="fontStyle" tabindex="0" @keydown="onRootKeydown">
     <div class="toolbar">
       <a-space wrap>
-        <a-select v-model:value="terminalStore.encoding" style="width: 120px" size="small">
+        <a-select v-model:value="encoding" style="width: 120px" size="small">
           <a-select-option value="utf-8">显示 UTF-8</a-select-option>
           <a-select-option value="gbk">显示 GBK</a-select-option>
           <a-select-option value="hex">显示 HEX</a-select-option>
@@ -13,16 +13,34 @@
           <template #overlay>
             <a-menu>
               <a-menu-item>
-                <a-checkbox v-model:checked="terminalStore.displayConfig.showTimestamp">时间戳</a-checkbox>
+                <a-checkbox
+                  :checked="displayConfig.showTimestamp"
+                  @update:checked="(v: boolean) => patchConfig({ showTimestamp: v })"
+                >时间戳</a-checkbox>
               </a-menu-item>
               <a-menu-item>
-                <a-checkbox v-model:checked="terminalStore.displayConfig.showDirection">收发标记</a-checkbox>
+                <a-checkbox
+                  :checked="displayConfig.showDuration"
+                  @update:checked="(v: boolean) => patchConfig({ showDuration: v })"
+                >耗时</a-checkbox>
               </a-menu-item>
               <a-menu-item>
-                <a-checkbox v-model:checked="terminalStore.displayConfig.showChannel">通道来源</a-checkbox>
+                <a-checkbox
+                  :checked="displayConfig.showDirection"
+                  @update:checked="(v: boolean) => patchConfig({ showDirection: v })"
+                >收发标记</a-checkbox>
               </a-menu-item>
               <a-menu-item>
-                <a-checkbox v-model:checked="terminalStore.displayConfig.showTx">显示主动发送</a-checkbox>
+                <a-checkbox
+                  :checked="displayConfig.showChannel"
+                  @update:checked="(v: boolean) => patchConfig({ showChannel: v })"
+                >通道来源</a-checkbox>
+              </a-menu-item>
+              <a-menu-item>
+                <a-checkbox
+                  :checked="displayConfig.showTx"
+                  @update:checked="(v: boolean) => patchConfig({ showTx: v })"
+                >显示主动发送</a-checkbox>
               </a-menu-item>
             </a-menu>
           </template>
@@ -57,9 +75,9 @@
         <a-button size="small" @click="handleClear">清屏</a-button>
         <a-button size="small" @click="showVars = true">变量说明</a-button>
         <span class="rx-tx-counter">
-          <span class="rx-label">RX {{ terminalStore.rxCount }}</span>
+          <span class="rx-label">RX {{ viewRxCount }}</span>
           ·
-          <span class="tx-label">TX {{ terminalStore.txCount }}</span>
+          <span class="tx-label">TX {{ viewTxCount }}</span>
         </span>
         <span class="hint">字号 {{ fontSize }} · Ctrl+滚轮</span>
       </a-space>
@@ -84,13 +102,22 @@
     <div v-if="sendHint" class="send-hint">{{ sendHint }}</div>
 
     <div class="log-container" ref="terminalRef">
-      <div v-for="line in terminalStore.filteredLines" :key="line.id" class="log-line">
-        <span v-if="terminalStore.displayConfig.showTimestamp" class="timestamp">[{{ line.timestamp }}]</span>
-        <span v-if="terminalStore.displayConfig.showDirection" :class="line.direction">{{ line.direction === 'rx' ? 'RX' : 'TX' }}</span>
-        <span v-if="terminalStore.displayConfig.showChannel" class="channel-tag">{{ line.channelId }}</span>
-        <span class="log-data"> {{ terminalStore.displayText(line) }}</span>
+      <div v-for="line in viewLines" :key="line.id" class="log-line">
+        <span v-if="displayConfig.showTimestamp" class="timestamp">
+          <template v-if="displayConfig.showDuration && line.timestampEnd && line.timestampEnd !== line.timestamp">
+            [{{ line.timestamp }}→{{ line.timestampEnd }}]
+          </template>
+          <template v-else>[{{ line.timestamp }}]</template>
+        </span>
+        <span
+          v-if="displayConfig.showDuration && line.durationMs != null"
+          class="duration"
+        >({{ formatDurationMs(line.durationMs) }})</span>
+        <span v-if="displayConfig.showDirection" :class="line.direction">{{ line.direction === 'rx' ? 'RX' : 'TX' }}</span>
+        <span v-if="displayConfig.showChannel" class="channel-tag">{{ line.channelId }}</span>
+        <span class="log-data"> {{ lineDisplayText(line) }}</span>
       </div>
-      <div v-if="terminalStore.filteredLines.length === 0" class="log-placeholder">等待数据...</div>
+      <div v-if="viewLines.length === 0" class="log-placeholder">等待数据...</div>
     </div>
 
     <div v-if="previewText" class="preview">预览：{{ previewText }}</div>
@@ -204,9 +231,9 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { errorMessage } from '@/utils/error'
 import { message, Modal } from 'ant-design-vue'
-import { useConnectionStore, useTerminalStore, useTxPlannerStore } from '@/stores'
-import type { Encoding } from '@/stores/terminalStore'
-import { formatLogLine } from '@/utils/formatLogLine'
+import { useConnectionStore, useTerminalStore, useTxPlannerStore, useWorkspaceStore } from '@/stores'
+import type { DisplayConfig, Encoding, TerminalLine } from '@/stores/terminalStore'
+import { formatDurationMs, formatLogLine } from '@/utils/formatLogLine'
 import {
   exportTextToDisk,
   createRealtimeLogFile,
@@ -236,11 +263,64 @@ import {
 import { useViewFontSize } from '@/composables/useViewFontSize'
 import TxVarHelpDrawer from '@/components/TxVarHelpDrawer.vue'
 
-const props = defineProps<{ channelId: string }>()
+const props = defineProps<{ channelId: string; viewId: string }>()
 
 const connectionStore = useConnectionStore()
 const terminalStore = useTerminalStore()
 const txPlanner = useTxPlannerStore()
+const workspace = useWorkspaceStore()
+
+const viewRawConfig = computed(() => {
+  const views = workspace.viewsByChannel[props.channelId] || []
+  return (views.find(v => v.id === props.viewId)?.config || {}) as Record<string, unknown>
+})
+
+const displayConfig = computed<DisplayConfig>(() => {
+  const cfg = viewRawConfig.value
+  return {
+    showTimestamp: cfg.showTimestamp !== false,
+    showDuration: cfg.showDuration === true,
+    showDirection: cfg.showDirection !== false,
+    showChannel: cfg.showChannel !== false,
+    showTx: cfg.showTx !== false,
+  }
+})
+
+const encoding = computed<Encoding>({
+  get: () => {
+    const v = viewRawConfig.value.encoding
+    return v === 'gbk' || v === 'hex' || v === 'utf-8' ? v : 'utf-8'
+  },
+  set: (v) => patchConfig({ encoding: v }),
+})
+
+function patchConfig(partial: Record<string, unknown>) {
+  workspace.updateViewConfig(props.channelId, props.viewId, partial)
+}
+
+function lineDisplayText(line: TerminalLine) {
+  return terminalStore.displayText(line, encoding.value)
+}
+
+const viewLines = computed(() => {
+  const showTxSend = displayConfig.value.showTx
+  const pool = terminalStore.lines
+  const selected = props.channelId
+  if (selected.startsWith('tcp_server-')) {
+    const clientIds = new Set(
+      connectionStore.getServerClients(selected).map(c => c.channelId),
+    )
+    return pool.filter(
+      l =>
+        (showTxSend || l.direction === 'rx') &&
+        (l.channelId === selected || clientIds.has(l.channelId)),
+    )
+  }
+  return pool.filter(l => (showTxSend || l.direction === 'rx') && l.channelId === selected)
+})
+
+const viewRxCount = computed(() => viewLines.value.filter(l => l.direction === 'rx').length)
+const viewTxCount = computed(() => viewLines.value.filter(l => l.direction === 'tx').length)
 
 const rootRef = ref<HTMLElement | null>(null)
 const terminalRef = ref<HTMLElement>()
@@ -291,7 +371,7 @@ let realtimeLastId = 0
 
 const channelLabel = computed(() => {
   const ch = connectionStore.channelList.find(c => c.channelId === props.channelId)
-  return ch?.portName || props.channelId
+  return ch ? connectionStore.channelDisplayName(ch) : props.channelId
 })
 
 const previewText = computed(() => {
@@ -366,18 +446,18 @@ watch(() => props.channelId, (id) => {
 })
 
 watch(
-  () => terminalStore.filteredLines.length,
+  () => viewLines.value.length,
   async () => {
     if (realtimeOn.value && realtimePath.value) {
-      const lines = terminalStore.filteredLines
+      const lines = viewLines.value
       for (const line of lines) {
         if (line.id <= realtimeLastId) continue
         realtimeLastId = Math.max(realtimeLastId, line.id)
         if (line.direction !== 'rx') continue
         const text = formatLogLine(
           line,
-          terminalStore.displayText(line),
-          terminalStore.displayConfig,
+          lineDisplayText(line),
+          displayConfig.value,
         )
         try {
           await appendRealtimeLog(realtimePath.value, text)
@@ -431,14 +511,14 @@ async function reveal(path: string) {
 }
 
 async function handleExport() {
-  const lines = terminalStore.filteredLines
+  const lines = viewLines.value
   if (lines.length === 0) {
     message.warning('当前无可导出数据')
     return
   }
-  const cfg = terminalStore.displayConfig
+  const cfg = displayConfig.value
   const text = lines
-    .map(line => formatLogLine(line, terminalStore.displayText(line), cfg))
+    .map(line => formatLogLine(line, lineDisplayText(line), cfg))
     .join('\n')
   try {
     const { path, via } = await exportTextToDisk({
@@ -470,11 +550,11 @@ async function toggleRealtime() {
     return
   }
   try {
-    const cfg = terminalStore.displayConfig
+    const cfg = displayConfig.value
     const header =
       `# serial-tools 接收实时落盘\n` +
       `# channel=${props.channelId}\n` +
-      `# fields: timestamp=${cfg.showTimestamp} direction=${cfg.showDirection} channel=${cfg.showChannel}\n` +
+      `# fields: timestamp=${cfg.showTimestamp} duration=${cfg.showDuration} direction=${cfg.showDirection} channel=${cfg.showChannel}\n` +
       `# started=${new Date().toISOString()}\n\n`
     const path = await createRealtimeLogFile({
       feature: '接收实时',
@@ -484,7 +564,7 @@ async function toggleRealtime() {
     })
     realtimePath.value = path
     realtimeOn.value = true
-    realtimeLastId = terminalStore.filteredLines.reduce((m, l) => Math.max(m, l.id), 0)
+    realtimeLastId = viewLines.value.reduce((m, l) => Math.max(m, l.id), 0)
     Modal.success({
       title: '已开始实时落盘',
       content: `仅追加本通道新接收(RX)数据。\n路径：\n${path}`,
@@ -656,6 +736,7 @@ function handleSendKeydown(e: KeyboardEvent) {
 .log-container { flex: 1; overflow-y: auto; min-height: 160px; font-family: ui-monospace, monospace; }
 .log-line { line-height: 1.5; }
 .timestamp { color: #8c8c8c; margin-right: 4px; }
+.duration { color: #8c8c8c; margin-right: 4px; font-size: 0.92em; }
 .rx { color: #389e0d; margin-right: 4px; }
 .tx { color: #0958d9; margin-right: 4px; }
 /* 用 em 跟随 Ctrl+滚轮 根字号，避免通道名固定 11px */

@@ -12,6 +12,12 @@ use tokio::sync::{broadcast, Mutex, MutexGuard};
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PacketEntry {
     pub timestamp: String,
+    /// 收完时刻（串口分帧有意义；缺省与 timestamp 相同）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timestamp_end: Option<String>,
+    /// 首字节 → 收完耗时毫秒
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
     pub direction: String, // rx / tx
     pub channel_id: String,
     pub bytes: Vec<u8>,
@@ -29,6 +35,8 @@ pub struct RxBroadcastEvent {
     pub direction: String, // rx / tx
     pub bytes: Vec<u8>,
     pub timestamp: String,
+    pub timestamp_end: Option<String>,
+    pub duration_ms: Option<u64>,
     pub seq: u64,
 }
 
@@ -74,8 +82,8 @@ impl PacketStore {
     pub fn emit_rx(
         &self,
         evt: RxBroadcastEvent,
-    ) -> Result<usize, broadcast::error::SendError<RxBroadcastEvent>> {
-        self.rx_broadcast.send(evt)
+    ) -> Result<usize, Box<broadcast::error::SendError<RxBroadcastEvent>>> {
+        self.rx_broadcast.send(evt).map_err(Box::new)
     }
 
     /// 下一个包序号（单调递增，从 1 开始）
@@ -99,14 +107,28 @@ impl PacketStore {
     }
 
     /// 追加一条 RX 包并广播（读线程调用）；返回分配的 seq
-    pub async fn push_rx(&self, channel_id: &str, bytes: Vec<u8>, timestamp: &str) -> u64 {
-        self.push_with_direction("rx", channel_id, bytes, timestamp)
-            .await
+    pub async fn push_rx(
+        &self,
+        channel_id: &str,
+        bytes: Vec<u8>,
+        timestamp: &str,
+        timestamp_end: Option<&str>,
+        duration_ms: Option<u64>,
+    ) -> u64 {
+        self.push_with_direction(
+            "rx",
+            channel_id,
+            bytes,
+            timestamp,
+            timestamp_end,
+            duration_ms,
+        )
+        .await
     }
 
     /// 追加一条 TX 包并广播（send_data 成功后调用，供总线 TxFromBus 订阅者接收）
     pub async fn push_tx(&self, channel_id: &str, bytes: Vec<u8>, timestamp: &str) -> u64 {
-        self.push_with_direction("tx", channel_id, bytes, timestamp)
+        self.push_with_direction("tx", channel_id, bytes, timestamp, None, None)
             .await
     }
 
@@ -116,12 +138,17 @@ impl PacketStore {
         channel_id: &str,
         bytes: Vec<u8>,
         timestamp: &str,
+        timestamp_end: Option<&str>,
+        duration_ms: Option<u64>,
     ) -> u64 {
         let seq = self.next_seq();
         let hex_str = hex::encode(&bytes);
         let text = String::from_utf8_lossy(&bytes).to_string();
+        let end = timestamp_end.map(|s| s.to_string());
         self.push_packet(PacketEntry {
             timestamp: timestamp.to_string(),
+            timestamp_end: end.clone(),
+            duration_ms,
             direction: direction.to_string(),
             channel_id: channel_id.to_string(),
             bytes: bytes.clone(),
@@ -135,6 +162,8 @@ impl PacketStore {
             direction: direction.to_string(),
             bytes,
             timestamp: timestamp.to_string(),
+            timestamp_end: end,
+            duration_ms,
             seq,
         });
         seq
@@ -162,7 +191,9 @@ mod tests {
     async fn push_rx_broadcast_and_buffer() {
         let store = PacketStore::new();
         let mut rx = store.subscribe_rx();
-        let seq = store.push_rx("serial-COM1", b"hello".to_vec(), "t0").await;
+        let seq = store
+            .push_rx("serial-COM1", b"hello".to_vec(), "t0", None, None)
+            .await;
         assert_eq!(seq, 1);
 
         let evt = rx.try_recv().unwrap();
@@ -204,6 +235,8 @@ mod tests {
             store
                 .push_packet(PacketEntry {
                     timestamp: String::new(),
+                    timestamp_end: None,
+                    duration_ms: None,
                     direction: "tx".to_string(),
                     channel_id: "ch".to_string(),
                     bytes: vec![i as u8],
@@ -221,7 +254,7 @@ mod tests {
     #[tokio::test]
     async fn clear_resets_buffer() {
         let store = PacketStore::new();
-        store.push_rx("ch", b"x".to_vec(), "t").await;
+        store.push_rx("ch", b"x".to_vec(), "t", None, None).await;
         store.clear().await;
         assert_eq!(store.lock().await.len(), 0);
     }

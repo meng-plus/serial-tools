@@ -6,6 +6,10 @@ export interface RxEventPayload {
   hex: string
   text: string
   timestamp: string
+  /** 收完时刻（串口分帧） */
+  timestamp_end?: string
+  /** 首字节 → 收完耗时毫秒 */
+  duration_ms?: number
   seq?: number
   bytes?: number[]
 }

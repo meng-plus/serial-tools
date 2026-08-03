@@ -150,6 +150,7 @@ impl AppState {
         let rt = tokio::runtime::Handle::current();
         let rt_emit = rt.clone();
         let cid_emit = cid.clone();
+        // 仅串口超时断包（TCP 按 socket 读块直接上报，不分帧）
         let use_framer = transport.descriptor().kind == "serial";
         let timeout_pair = if use_framer {
             Some(self.get_or_init_serial_timeouts(&channel_id, 50, 200).await)
@@ -170,28 +171,66 @@ impl AppState {
                 })
             });
 
-            let emit_chunk = move |data: Vec<u8>| {
-                if data.is_empty() {
-                    return;
-                }
-                let ts = chrono::Local::now().format("%H:%M:%S%.3f").to_string();
-                recordings.log_rx(&cid_emit, &data, &ts);
-                let cid_inner = cid_emit.clone();
-                let ts_inner = ts;
-                let pkts = packets.clone();
-                rt_emit.block_on(async move {
-                    let _ = pkts.push_rx(&cid_inner, data, &ts_inner).await;
-                });
-            };
+            let emit_chunk =
+                move |data: Vec<u8>, duration_ms: Option<u64>, since_last_byte_ms: Option<u64>| {
+                    if data.is_empty() {
+                        return;
+                    }
+                    let decided = chrono::Local::now();
+                    let (start_ts, duration_ms, end_opt) = match duration_ms {
+                        Some(span_ms) => {
+                            let idle = since_last_byte_ms.unwrap_or(0).min(i64::MAX as u64) as i64;
+                            let span = span_ms.min(i64::MAX as u64) as i64;
+                            // 判定时刻回拨空闲等待 → 末字节；再回拨收包跨度 → 首字节
+                            let end = decided - chrono::Duration::milliseconds(idle);
+                            let start = end - chrono::Duration::milliseconds(span);
+                            (
+                                start.format("%H:%M:%S%.3f").to_string(),
+                                Some(span_ms),
+                                Some(end.format("%H:%M:%S%.3f").to_string()),
+                            )
+                        }
+                        None => {
+                            let ts = decided.format("%H:%M:%S%.3f").to_string();
+                            (ts, None, None)
+                        }
+                    };
+                    recordings.log_rx(&cid_emit, &data, &start_ts);
+                    let cid_inner = cid_emit.clone();
+                    let pkts = packets.clone();
+                    rt_emit.block_on(async move {
+                        let _ = pkts
+                            .push_rx(&cid_inner, data, &start_ts, end_opt.as_deref(), duration_ms)
+                            .await;
+                    });
+                };
 
             let flush_framer = |framer: &mut Framer| {
                 while let Some(frame) = framer.try_extract() {
-                    emit_chunk(frame);
+                    emit_chunk(
+                        frame.bytes,
+                        Some(frame.duration_ms),
+                        Some(frame.since_last_byte_ms),
+                    );
+                }
+            };
+
+            let flush_remaining = |framer: &mut Framer| {
+                flush_framer(framer);
+                if let Some(frame) = framer.take_remaining() {
+                    emit_chunk(
+                        frame.bytes,
+                        Some(frame.duration_ms),
+                        Some(frame.since_last_byte_ms),
+                    );
                 }
             };
 
             loop {
                 if cancel.load(Ordering::Relaxed) {
+                    if let Some(framer) = framer.as_mut() {
+                        flush_remaining(framer);
+                    }
                     break;
                 }
                 if let (Some(framer), Some(pair)) = (framer.as_mut(), timeout_pair.as_ref()) {
@@ -225,11 +264,14 @@ impl AppState {
                             framer.feed(&data);
                             flush_framer(framer);
                         } else {
-                            emit_chunk(data);
+                            emit_chunk(data, None, None);
                         }
                     }
                     Err(e) => {
                         if cancel.load(Ordering::Relaxed) {
+                            if let Some(framer) = framer.as_mut() {
+                                flush_remaining(framer);
+                            }
                             break;
                         }
                         if e.is_fatal_disconnect() {
@@ -239,7 +281,7 @@ impl AppState {
                                 break;
                             }
                         }
-                        // 读超时：推进串口 Framer 的 byte/frame 超时判断
+                        // 读超时：推进 Framer 的 byte/frame 超时判断
                         if let Some(framer) = framer.as_mut() {
                             flush_framer(framer);
                         }

@@ -143,6 +143,8 @@ async fn test_appstate_push_packet() {
 
     let entry = serial_tools_lib::state::PacketEntry {
         timestamp: "12:00:00.000".to_string(),
+        timestamp_end: None,
+        duration_ms: None,
         direction: "rx".to_string(),
         channel_id: "test".to_string(),
         bytes: b"hello".to_vec(),
@@ -167,6 +169,8 @@ async fn test_appstate_packet_overflow_trim() {
     for i in 0..11000 {
         let entry = serial_tools_lib::state::PacketEntry {
             timestamp: format!("{:06}", i),
+            timestamp_end: None,
+            duration_ms: None,
             direction: "rx".to_string(),
             channel_id: "test".to_string(),
             bytes: vec![i as u8],
@@ -267,6 +271,8 @@ async fn test_appstate_rx_broadcast() {
         direction: "rx".to_string(),
         bytes: b"data".to_vec(),
         timestamp: "12:00:00.000".to_string(),
+        timestamp_end: None,
+        duration_ms: None,
         seq: 1,
     };
 
@@ -682,6 +688,8 @@ async fn test_rx_broadcast_multi_subscriber() {
         direction: "rx".to_string(),
         bytes: b"multi".to_vec(),
         timestamp: "12:00:00.000".to_string(),
+        timestamp_end: None,
+        duration_ms: None,
         seq: 2,
     };
     state.packets.emit_rx(event).unwrap();

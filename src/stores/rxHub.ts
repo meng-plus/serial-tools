@@ -14,6 +14,8 @@ export interface RxSubscribeOptions {
 
 interface PacketRow {
   timestamp: string
+  timestamp_end?: string | null
+  duration_ms?: number | null
   direction: string
   channel_id: string
   bytes: number[]
@@ -111,6 +113,8 @@ export const useRxHub = defineStore('rxHub', () => {
       text: pkt.text || '',
       bytes: pkt.bytes || hexToBytes(pkt.hex || ''),
       timestamp: pkt.timestamp,
+      timestampEnd: pkt.timestamp_end || undefined,
+      durationMs: pkt.duration_ms ?? undefined,
       seq: pkt.seq && pkt.seq > 0 ? pkt.seq : undefined,
     })
   }
@@ -167,6 +171,8 @@ export const useRxHub = defineStore('rxHub', () => {
             text: payload.text || '',
             bytes: payload.bytes?.length ? payload.bytes : hexToBytes(hex),
             timestamp: payload.timestamp,
+            timestampEnd: payload.timestamp_end,
+            durationMs: payload.duration_ms,
             seq: payload.seq,
           })
         })

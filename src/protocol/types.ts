@@ -83,6 +83,10 @@ export interface RxRecord {
   seq?: number
   channelId: string
   timestamp: string
+  /** 收完时刻 */
+  timestampEnd?: string
+  /** 首字节 → 收完耗时毫秒 */
+  durationMs?: number
   direction: 'rx' | 'tx'
   hex: string
   text: string

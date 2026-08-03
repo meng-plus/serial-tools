@@ -8,6 +8,8 @@ import type { RxRecord } from '@/protocol/types'
 export interface TerminalLine {
   id: number
   timestamp: string
+  timestampEnd?: string
+  durationMs?: number
   direction: 'rx' | 'tx'
   channelId: string
   hex: string
@@ -20,6 +22,7 @@ export type Encoding = 'utf-8' | 'gbk' | 'hex'
 
 export interface DisplayConfig {
   showTimestamp: boolean
+  showDuration: boolean
   showDirection: boolean
   showChannel: boolean
   showTx: boolean
@@ -43,6 +46,7 @@ export const useTerminalStore = defineStore('terminal', () => {
   const maxLines = ref(10000)
   const displayConfig = ref<DisplayConfig>({
     showTimestamp: true,
+    showDuration: false,
     showDirection: true,
     showChannel: true,
     showTx: true,
@@ -87,6 +91,8 @@ export const useTerminalStore = defineStore('terminal', () => {
     return {
       id: ++lineIdCounter,
       timestamp: r.timestamp,
+      timestampEnd: r.timestampEnd,
+      durationMs: r.durationMs,
       direction: r.direction,
       channelId: r.channelId,
       hex: r.hex,
@@ -122,8 +128,8 @@ export const useTerminalStore = defineStore('terminal', () => {
     unsub = null
   }
 
-  function displayText(line: TerminalLine): string {
-    switch (encoding.value) {
+  function displayText(line: TerminalLine, enc?: Encoding): string {
+    switch (enc ?? encoding.value) {
       case 'hex':
         return line.hex.replace(/(.{2})/g, '$1 ').trim()
       case 'gbk':

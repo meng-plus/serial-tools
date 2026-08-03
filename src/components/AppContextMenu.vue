@@ -27,6 +27,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { message } from 'ant-design-vue'
 import { useRouter } from 'vue-router'
 import { useConnectionStore, useTerminalStore } from '@/stores'
+import { formatLogLine } from '@/utils/formatLogLine'
 
 export type CtxItem =
   | { type: 'divider' }
@@ -175,15 +176,7 @@ function buildItems(el: HTMLElement | null): CtxItem[] {
         label: '复制全部日志',
         action: async () => {
           const text = terminalStore.filteredLines
-            .map(l => {
-              const parts = [
-                terminalStore.displayConfig.showTimestamp ? `[${l.timestamp}]` : '',
-                terminalStore.displayConfig.showDirection ? (l.direction === 'rx' ? 'RX' : 'TX') : '',
-                terminalStore.displayConfig.showChannel ? l.channelId : '',
-                terminalStore.displayText(l),
-              ].filter(Boolean)
-              return parts.join(' ')
-            })
+            .map(l => formatLogLine(l, terminalStore.displayText(l), terminalStore.displayConfig))
             .join('\n')
           await copyText(text)
         },

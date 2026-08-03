@@ -45,6 +45,9 @@
                 <a-checkbox v-model:checked="terminalStore.displayConfig.showTimestamp">时间戳</a-checkbox>
               </a-menu-item>
               <a-menu-item>
+                <a-checkbox v-model:checked="terminalStore.displayConfig.showDuration">耗时</a-checkbox>
+              </a-menu-item>
+              <a-menu-item>
                 <a-checkbox v-model:checked="terminalStore.displayConfig.showDirection">收发标记</a-checkbox>
               </a-menu-item>
               <a-menu-item>
@@ -68,7 +71,16 @@
 
     <div class="terminal-container terminal-xshell" ref="terminalRef">
       <div v-for="line in terminalStore.filteredLines" :key="line.id" class="terminal-line">
-        <span v-if="terminalStore.displayConfig.showTimestamp" class="timestamp">[{{ line.timestamp }}]</span>
+        <span v-if="terminalStore.displayConfig.showTimestamp" class="timestamp">
+          <template v-if="terminalStore.displayConfig.showDuration && line.timestampEnd && line.timestampEnd !== line.timestamp">
+            [{{ line.timestamp }}→{{ line.timestampEnd }}]
+          </template>
+          <template v-else>[{{ line.timestamp }}]</template>
+        </span>
+        <span
+          v-if="terminalStore.displayConfig.showDuration && line.durationMs != null"
+          class="duration"
+        >({{ formatDurationMs(line.durationMs) }})</span>
         <span v-if="terminalStore.displayConfig.showDirection" :class="line.direction">{{ line.direction === 'rx' ? 'RX' : 'TX' }}</span>
         <span v-if="terminalStore.displayConfig.showChannel" class="channel-tag">{{ line.channelId }}</span>
         <span class="terminal-data"> {{ terminalStore.displayText(line) }}</span>
@@ -124,6 +136,7 @@ import { VerticalAlignBottomOutlined, SettingOutlined } from '@ant-design/icons-
 import { message } from 'ant-design-vue'
 import { useConnectionStore, useTerminalStore } from '@/stores'
 import type { Encoding } from '@/stores/terminalStore'
+import { formatDurationMs } from '@/utils/formatLogLine'
 
 const route = useRoute()
 const router = useRouter()
@@ -239,6 +252,8 @@ function handleSendKeydown(e: KeyboardEvent) {
   min-height: 200px;
 }
 .terminal-line { line-height: 1.5; }
+.timestamp { color: #8c8c8c; margin-right: 4px; }
+.duration { color: #8c8c8c; margin-right: 4px; font-size: 0.92em; }
 .terminal-placeholder {
   color: #666;
   padding: 20px;
