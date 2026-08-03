@@ -64,13 +64,12 @@ const shortcutCols = [
 
 const shortcuts = [
   { k: '1', scene: '发送', keys: 'Enter', desc: '发送；Shift+Enter 换行' },
-  { k: '2', scene: '重发', keys: 'Ctrl+↑', desc: '重发上一条' },
-  { k: '3', scene: '历史', keys: '↑ / ↓', desc: '光标在开头时翻历史' },
-  { k: '4', scene: '字号', keys: 'Ctrl+滚轮', desc: '视图内字体 10–28' },
-  { k: '5', scene: '清屏', keys: 'Ctrl+L', desc: '清空显示，不断开' },
-  { k: '6', scene: 'VT100 复制', keys: 'Ctrl+Shift+C', desc: '有选区时 Ctrl+C 亦可' },
-  { k: '7', scene: 'VT100 粘贴', keys: 'Ctrl+Shift+V', desc: '粘贴到终端并发送' },
-  { k: '8', scene: '视图全屏', keys: 'F11', desc: '当前视图沉浸铺满窗口；再按 F11 或 Esc 退出' },
+  { k: '2', scene: '历史', keys: '↑ / ↓', desc: '光标在开头时翻历史' },
+  { k: '3', scene: '字号', keys: 'Ctrl+滚轮', desc: '视图内字体 10–28' },
+  { k: '4', scene: '清屏', keys: 'Ctrl+L', desc: '清空显示，不断开' },
+  { k: '5', scene: 'VT100 复制', keys: 'Ctrl+Shift+C', desc: '有选区时 Ctrl+C 亦可' },
+  { k: '6', scene: 'VT100 粘贴', keys: 'Ctrl+Shift+V', desc: '粘贴到终端并发送' },
+  { k: '7', scene: '视图全屏', keys: 'F11', desc: '当前视图沉浸铺满窗口；再按 F11 或 Esc 退出' },
 ]
 
 function handleSaveSettings() {

@@ -1,6 +1,9 @@
 /** Workspace 整包 schema（不绑定易变 channelId） */
 
 import type { ProtocolRule, ViewType } from '@/protocol/types'
+import { CHECKSUM_CATALOG, type ChecksumAlgo } from '@/protocol/checksum'
+
+export type { ChecksumAlgo }
 
 export const WORKSPACE_VERSION = 2
 
@@ -10,7 +13,7 @@ export interface ViewTemplate {
   config?: Record<string, unknown>
 }
 
-/** 定时发送条目：各自周期 / 次数；内容原样发送（无自动后缀） */
+/** 定时发送条目：各自周期 / 次数；校验经变量或条目级追加校验 */
 export interface TxListItem {
   id: string
   label?: string
@@ -24,36 +27,32 @@ export interface TxListItem {
   loop: boolean
   /** 非循环时的发送次数 */
   count: number
-  /** 可选帧配置 id（CRC 等，展开变量之后应用） */
+  /** @deprecated 发送路径已忽略；仅兼容旧 workspace */
   frameProfileId?: string
+  /** 追加校验算法（仅 HEX 模式生效） */
+  checksum?: ChecksumAlgo
+  /** 校验写入端序 */
+  checksumEndian?: 'le' | 'be'
+  /** 校验覆盖起始字节 */
+  coverStart?: number
+  /** 校验覆盖结束模式 */
+  coverEndMode?: 'to_end' | 'exclude_tail' | 'length'
+  /** 校验覆盖结束值（exclude_tail/length 模式） */
+  coverEndValue?: number
 }
 
 export interface TxListTemplate {
   id: string
   name: string
   items: TxListItem[]
-  /** 列表默认帧配置（条目未指定时） */
+  /** @deprecated 发送路径已忽略；仅兼容旧 workspace */
   frameProfileId?: string
 }
 
-export type ChecksumAlgo =
-  | 'none'
-  | 'sum8'
-  | 'sum16_le'
-  | 'sum16_be'
-  | 'xor8'
-  | 'crc8_07'
-  | 'crc8_31'
-  | 'crc16_modbus'
-  | 'crc16_ccitt_false'
-  | 'crc16_xmodem'
-  | 'crc16_ibm'
-
-
+/** @deprecated 旧「帧配置」；导入仍可读，UI/发送不再使用 */
 export interface FrameProfile {
   id: string
   name: string
-  /** 在末尾追加校验 */
   checksum: ChecksumAlgo
   /** 在指定偏移写入递增序号（1 字节），-1 表示不写 */
   seqOffset: number
@@ -104,6 +103,11 @@ export function createDefaultTxItem(partial?: Partial<TxListItem>): TxListItem {
     loop: partial?.loop ?? true,
     count: partial?.count ?? 1,
     frameProfileId: partial?.frameProfileId,
+    checksum: partial?.checksum,
+    checksumEndian: partial?.checksumEndian,
+    coverStart: partial?.coverStart,
+    coverEndMode: partial?.coverEndMode,
+    coverEndValue: partial?.coverEndValue,
   }
 }
 
@@ -123,6 +127,13 @@ export function normalizeProtocolInstance(
   }
 }
 
+const CHECKSUM_ALGOS = new Set<string>(CHECKSUM_CATALOG.map(c => c.id))
+
+function parseChecksumAlgo(raw: unknown): ChecksumAlgo | undefined {
+  if (typeof raw !== 'string' || !CHECKSUM_ALGOS.has(raw)) return undefined
+  return raw as ChecksumAlgo
+}
+
 export function normalizeTxItem(
   raw: Record<string, unknown>,
   listDefaults?: { intervalMs?: number; loop?: boolean; frameProfileId?: string },
@@ -137,6 +148,17 @@ export function normalizeTxItem(
     ? raw.loop
     : (listDefaults?.loop ?? true)
   const count = typeof raw.count === 'number' && raw.count >= 1 ? Math.floor(raw.count) : 1
+  const checksum = parseChecksumAlgo(raw.checksum)
+  const checksumEndian =
+    raw.checksumEndian === 'le' || raw.checksumEndian === 'be' ? raw.checksumEndian : undefined
+  const coverEndMode =
+    raw.coverEndMode === 'to_end' ||
+    raw.coverEndMode === 'exclude_tail' ||
+    raw.coverEndMode === 'length'
+      ? raw.coverEndMode
+      : checksum && checksum !== 'none'
+        ? 'to_end'
+        : undefined
   return {
     id: typeof raw.id === 'string' ? raw.id : `item-${Date.now()}`,
     label: typeof raw.label === 'string' ? raw.label : '',
@@ -150,6 +172,17 @@ export function normalizeTxItem(
       typeof raw.frameProfileId === 'string'
         ? raw.frameProfileId
         : listDefaults?.frameProfileId,
+    checksum,
+    checksumEndian,
+    coverStart:
+      typeof raw.coverStart === 'number'
+        ? Math.max(0, Math.floor(raw.coverStart))
+        : checksum && checksum !== 'none'
+          ? 0
+          : undefined,
+    coverEndMode,
+    coverEndValue:
+      typeof raw.coverEndValue === 'number' ? Math.max(0, Math.floor(raw.coverEndValue)) : undefined,
   }
 }
 

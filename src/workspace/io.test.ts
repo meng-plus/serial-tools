@@ -52,6 +52,37 @@ describe('workspace io', () => {
     expect(back.frameProfiles[0].checksum).toBe('crc16_modbus')
   })
 
+  it('roundtrips tx item checksum and cover fields', () => {
+    const pkg = buildWorkspacePackage({
+      rules: [],
+      views: [],
+      txLists: [{
+        id: 'tx1',
+        name: '轮询',
+        items: [{
+          id: 'i1',
+          format: 'hex',
+          payload: '01 03 00 00 00 0A',
+          enabled: true,
+          intervalMs: 1000,
+          loop: true,
+          count: 1,
+          checksum: 'crc16_modbus',
+          checksumEndian: 'le',
+          coverStart: 0,
+          coverEndMode: 'to_end',
+        }],
+      }],
+      frameProfiles: [],
+    })
+    const back = parseWorkspace(serializeWorkspace(pkg, 'json'))
+    const item = back.txLists[0].items[0]
+    expect(item.checksum).toBe('crc16_modbus')
+    expect(item.checksumEndian).toBe('le')
+    expect(item.coverStart).toBe(0)
+    expect(item.coverEndMode).toBe('to_end')
+  })
+
   it('migrates legacy list-level interval/loop and drops suffix', () => {
     const raw = JSON.stringify({
       kind: 'workspace_package',

@@ -21,6 +21,9 @@
               <a-menu-item>
                 <a-checkbox v-model:checked="terminalStore.displayConfig.showChannel">通道来源</a-checkbox>
               </a-menu-item>
+              <a-menu-item>
+                <a-checkbox v-model:checked="terminalStore.displayConfig.showTx">显示主动发送</a-checkbox>
+              </a-menu-item>
             </a-menu>
           </template>
         </a-dropdown>
@@ -94,8 +97,22 @@
 
     <div class="send-opts">
       <a-space wrap size="small">
+        <span class="opt-label">发送编码</span>
+        <a-select v-model:value="sendFormat" style="width: 110px" size="small">
+          <a-select-option value="utf-8">UTF-8</a-select-option>
+          <a-select-option value="gbk">GBK</a-select-option>
+          <a-select-option value="hex">HEX</a-select-option>
+        </a-select>
+
         <span class="opt-label">追加校验</span>
-        <a-select v-model:value="checksum" style="width: 260px" size="small" @change="onChecksumAlgoChange">
+        <a-select
+          v-model:value="checksum"
+          style="width: 260px"
+          size="small"
+          :get-popup-container="popupContainer"
+          :dropdown-style="{ zIndex: 3000 }"
+          @change="onChecksumAlgoChange"
+        >
           <a-select-option v-for="c in CHECKSUM_CATALOG" :key="c.id" :value="c.id">
             {{ c.name }}
           </a-select-option>
@@ -103,7 +120,14 @@
         <template v-if="checksum !== 'none'">
           <template v-if="checksumNeedsEndian(checksum)">
             <span class="opt-label">写入端序</span>
-            <a-select v-model:value="checksumEndian" style="width: 140px" size="small" @change="onChecksumEndianChange">
+            <a-select
+              v-model:value="checksumEndian"
+              style="width: 140px"
+              size="small"
+              :get-popup-container="popupContainer"
+              :dropdown-style="{ zIndex: 3000 }"
+              @change="onChecksumEndianChange"
+            >
               <a-select-option v-for="o in ENDIAN_OPTIONS" :key="o.value" :value="o.value">
                 {{ o.label }}
               </a-select-option>
@@ -111,7 +135,13 @@
           </template>
           <span class="opt-label">覆盖起</span>
           <a-input-number v-model:value="coverStart" :min="0" size="small" style="width: 70px" />
-          <a-select v-model:value="coverEndMode" style="width: 130px" size="small">
+          <a-select
+            v-model:value="coverEndMode"
+            style="width: 130px"
+            size="small"
+            :get-popup-container="popupContainer"
+            :dropdown-style="{ zIndex: 3000 }"
+          >
             <a-select-option value="to_end">到末尾</a-select-option>
             <a-select-option value="exclude_tail">排除尾部N</a-select-option>
             <a-select-option value="length">指定长度</a-select-option>
@@ -130,11 +160,6 @@
     </div>
 
     <div class="send-bar">
-      <a-select v-model:value="sendFormat" style="width: 110px">
-        <a-select-option value="utf-8">UTF-8</a-select-option>
-        <a-select-option value="gbk">GBK</a-select-option>
-        <a-select-option value="hex">HEX</a-select-option>
-      </a-select>
       <a-textarea
         ref="sendInputRef"
         v-model:value="sendPayload"
@@ -144,35 +169,34 @@
         @keydown="handleSendKeydown"
         @paste="onHexPaste"
       />
-      <a-select v-if="sendFormat !== 'hex'" v-model:value="sendSuffix" style="width: 100px">
-        <a-select-option value="none">无后缀</a-select-option>
-        <a-select-option value="cr">CR</a-select-option>
-        <a-select-option value="lf">LF</a-select-option>
-        <a-select-option value="crlf">CRLF</a-select-option>
-      </a-select>
-      <a-button size="small" :disabled="!lastSent" @click="resendLast">重发</a-button>
-      <a-button type="primary" :disabled="!sendPayload.trim()" @click="handleSend">发送</a-button>
+      <div class="send-actions">
+        <a-select
+          v-if="sendFormat !== 'hex'"
+          v-model:value="sendSuffix"
+          size="small"
+          class="send-suffix"
+        >
+          <a-select-option value="none">无后缀</a-select-option>
+          <a-select-option value="cr">CR</a-select-option>
+          <a-select-option value="lf">LF</a-select-option>
+          <a-select-option value="crlf">CRLF</a-select-option>
+        </a-select>
+        <a-button
+          type="primary"
+          class="send-btn"
+          :disabled="!sendPayload.trim()"
+          @click="handleSend"
+        >
+          发送
+        </a-button>
+      </div>
     </div>
 
-    <a-drawer v-model:open="showVars" title="变量说明" width="440" placement="right">
-      <p class="hint">发送前展开。条目序号用本发送框独立计数；通道序号与定时发送共享。</p>
-      <a-list :data-source="TX_VAR_CATALOG" size="small" bordered>
-        <template #renderItem="{ item }">
-          <a-list-item>
-            <a-list-item-meta>
-              <template #title><code>{{ item.token }}</code> <a-tag size="small">{{ item.scope }}</a-tag></template>
-              <template #description>
-                <div>{{ item.description }}</div>
-                <div class="ex">例：{{ item.hexExample }}</div>
-              </template>
-            </a-list-item-meta>
-            <template #actions>
-              <a @click="insertToken(item.token)">插入</a>
-            </template>
-          </a-list-item>
-        </template>
-      </a-list>
-    </a-drawer>
+    <TxVarHelpDrawer
+      v-model:open="showVars"
+      hint="发送前展开。条目序号用本发送框独立计数；通道序号与定时发送共享。点击「插入」写入发送框末尾。"
+      @insert="insertToken"
+    />
   </div>
 </template>
 
@@ -204,13 +228,13 @@ import {
   endianHint,
   type Endian,
 } from '@/protocol/endianLabels'
-import { TX_VAR_CATALOG } from '@/protocol/txVars'
 import {
   normalizeHexInput,
   runSendPipeline,
   type CoverEndMode,
 } from '@/protocol/sendPipeline'
 import { useViewFontSize } from '@/composables/useViewFontSize'
+import TxVarHelpDrawer from '@/components/TxVarHelpDrawer.vue'
 
 const props = defineProps<{ channelId: string }>()
 
@@ -247,6 +271,10 @@ const checksumEndianHint = computed(() => {
   return `${endianHint(checksumEndian.value)}${cat?.hint ? ` · ${cat.hint}` : ''}`
 })
 
+function popupContainer() {
+  return document.body
+}
+
 function onChecksumAlgoChange() {
   checksumEndian.value = defaultEndianForChecksum(checksum.value)
   checksum.value = applyEndianToChecksumAlgo(checksum.value, checksumEndian.value)
@@ -258,7 +286,6 @@ function onChecksumEndianChange() {
 
 const history = ref<string[]>([])
 const historyIdx = ref(-1)
-const lastSent = ref('')
 const SEQ_ITEM = 'io-log-send'
 let realtimeLastId = 0
 
@@ -542,16 +569,9 @@ async function handleSend() {
     }
     txPlanner.bumpSeqs(props.channelId, SEQ_ITEM, r.usedItemSeq, r.usedChannelSeq)
     pushHistory(raw)
-    lastSent.value = raw
   } catch (e: unknown) {
     message.error(errorMessage(e))
   }
-}
-
-function resendLast() {
-  if (!lastSent.value) return
-  sendPayload.value = lastSent.value
-  void handleSend()
 }
 
 function handleSendKeydown(e: KeyboardEvent) {
@@ -559,11 +579,6 @@ function handleSendKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
     e.preventDefault()
     void handleSend()
-    return
-  }
-  if (e.ctrlKey && e.key === 'ArrowUp') {
-    e.preventDefault()
-    resendLast()
     return
   }
   if (e.key === 'ArrowUp' && !e.shiftKey && !e.ctrlKey) {
@@ -648,12 +663,21 @@ function handleSendKeydown(e: KeyboardEvent) {
 .log-placeholder { color: #666; padding: 24px; text-align: center; }
 .send-bar {
   display: flex;
-  align-items: flex-end;
+  align-items: stretch;
   gap: 8px;
   margin-top: 8px;
   padding-top: 10px;
   border-top: 1px solid #f0f0f0;
 }
 .send-input { flex: 1; min-width: 0; }
-.ex { margin-top: 4px; font-size: 12px; }
+.send-actions {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+  width: 100px;
+}
+.send-suffix { width: 100%; }
+.send-btn { width: 100%; }
 </style>

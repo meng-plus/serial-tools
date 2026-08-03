@@ -34,6 +34,13 @@
         </template>
       </div>
       <a-space>
+        <a-button
+          size="small"
+          :type="txPanel.open ? 'primary' : 'default'"
+          @click="workspace.toggleTxPanel(channelId)"
+        >
+          定时发送
+        </a-button>
         <a-button size="small" @click="workspace.toggleViewImmersive()">
           {{ workspace.viewImmersive ? '退出全屏' : '全屏视图' }}
         </a-button>
@@ -45,7 +52,6 @@
               <a-menu-item key="parsed_log">解析日志</a-menu-item>
               <a-menu-item key="monitor">监控</a-menu-item>
               <a-menu-item key="chart">图表</a-menu-item>
-              <a-menu-item key="tx_list">定时发送</a-menu-item>
               <a-menu-item key="chat">对话</a-menu-item>
               <a-menu-item key="vt100">VT100 终端</a-menu-item>
               <a-menu-item key="protocol_dashboard">协议仪表盘</a-menu-item>
@@ -55,47 +61,99 @@
       </a-space>
     </div>
 
-    <a-tabs
-      v-model:activeKey="workspace.activeViewId"
-      type="editable-card"
-      hide-add
-      @edit="onEditTab"
-    >
-      <a-tab-pane
-        v-for="v in workspace.activeViews"
-        :key="v.id"
-        :tab="v.title || v.type"
-        :closable="workspace.activeViews.length > 1"
+    <div class="ws-body">
+      <div class="tabs-area">
+        <a-tabs
+          v-model:activeKey="workspace.activeViewId"
+          type="editable-card"
+          hide-add
+          @edit="onEditTab"
+        >
+          <a-tab-pane
+            v-for="v in workspace.activeViews"
+            :key="v.id"
+            :tab="v.title || v.type"
+            :closable="workspace.activeViews.length > 1"
+          >
+            <div
+              class="view-body"
+              :class="{ immersive: workspace.viewImmersive && v.id === workspace.activeViewId }"
+            >
+              <div v-if="workspace.viewImmersive && v.id === workspace.activeViewId" class="immersive-bar">
+                <span>{{ v.title || v.type }} · {{ channelLabel }}</span>
+                <span class="immersive-hint">F11 / Esc 退出</span>
+                <a-button size="small" type="primary" ghost @click="workspace.exitViewImmersive()">
+                  退出全屏
+                </a-button>
+              </div>
+              <div class="view-content">
+                <TerminalView v-if="v.type === 'terminal'" :channel-id="channelId" />
+                <ParsedLogView v-else-if="v.type === 'parsed_log'" :channel-id="channelId" />
+                <MonitorView v-else-if="v.type === 'monitor'" :channel-id="channelId" />
+                <ChartView v-else-if="v.type === 'chart'" :channel-id="channelId" :view-id="v.id" />
+                <ChatView v-else-if="v.type === 'chat'" :channel-id="channelId" />
+                <Vt100View v-else-if="v.type === 'vt100'" :channel-id="channelId" :view-id="v.id" />
+                <ProtocolDashboardView
+                  v-else-if="v.type === 'protocol_dashboard'"
+                  :channel-id="channelId"
+                  :view-id="v.id"
+                />
+                <a-empty v-else description="该视图类型尚未实现" />
+              </div>
+            </div>
+          </a-tab-pane>
+        </a-tabs>
+      </div>
+
+      <!-- 停靠右侧：挤占主区宽度，左缘拖拽调宽 -->
+      <aside
+        v-if="txPanel.open && txPanel.docked"
+        class="tx-dock"
+        :style="{ width: `${txPanel.width}px` }"
       >
         <div
-          class="view-body"
-          :class="{ immersive: workspace.viewImmersive && v.id === workspace.activeViewId }"
-        >
-          <div v-if="workspace.viewImmersive && v.id === workspace.activeViewId" class="immersive-bar">
-            <span>{{ v.title || v.type }} · {{ channelLabel }}</span>
-            <span class="immersive-hint">F11 / Esc 退出</span>
-            <a-button size="small" type="primary" ghost @click="workspace.exitViewImmersive()">
-              退出全屏
-            </a-button>
-          </div>
-          <div class="view-content">
-            <TerminalView v-if="v.type === 'terminal'" :channel-id="channelId" />
-            <ParsedLogView v-else-if="v.type === 'parsed_log'" :channel-id="channelId" />
-            <MonitorView v-else-if="v.type === 'monitor'" :channel-id="channelId" />
-            <ChartView v-else-if="v.type === 'chart'" :channel-id="channelId" :view-id="v.id" />
-            <TxListView v-else-if="v.type === 'tx_list'" :channel-id="channelId" />
-            <ChatView v-else-if="v.type === 'chat'" :channel-id="channelId" />
-            <Vt100View v-else-if="v.type === 'vt100'" :channel-id="channelId" :view-id="v.id" />
-            <ProtocolDashboardView
-              v-else-if="v.type === 'protocol_dashboard'"
-              :channel-id="channelId"
-              :view-id="v.id"
-            />
-            <a-empty v-else description="该视图类型尚未实现" />
-          </div>
+          class="tx-resize-handle"
+          title="拖拽调节宽度"
+          @mousedown="onResizeStart"
+        />
+        <div class="tx-panel-header">
+          <span class="tx-panel-title">定时发送</span>
+          <a-button size="small" @click="workspace.setTxPanelDocked(channelId, false)">
+            浮动
+          </a-button>
+          <a-button size="small" type="text" @click="workspace.closeTxPanel(channelId)">
+            关闭
+          </a-button>
         </div>
-      </a-tab-pane>
-    </a-tabs>
+        <div class="tx-panel-body">
+          <TxListView :channel-id="channelId" />
+        </div>
+      </aside>
+    </div>
+
+    <!-- 浮动抽屉：遮罩覆盖，左缘拖拽调宽 -->
+    <a-drawer
+      :open="txPanel.open && !txPanel.docked"
+      title="定时发送"
+      placement="right"
+      :width="txPanel.width"
+      :destroy-on-close="false"
+      :z-index="1200"
+      root-class-name="tx-send-drawer"
+      @update:open="onFloatingOpenChange"
+    >
+      <template #extra>
+        <a-button size="small" type="link" @click="workspace.setTxPanelDocked(channelId, true)">
+          固定右侧
+        </a-button>
+      </template>
+      <div
+        class="tx-resize-handle drawer-handle"
+        title="拖拽调节宽度"
+        @mousedown="onResizeStart"
+      />
+      <TxListView :channel-id="channelId" />
+    </a-drawer>
   </div>
 </template>
 
@@ -104,7 +162,12 @@ import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { invoke } from '@/api'
-import { useConnectionStore, useWorkspaceStore } from '@/stores'
+import {
+  useConnectionStore,
+  useWorkspaceStore,
+  TX_PANEL_WIDTH_MIN,
+  TX_PANEL_WIDTH_MAX,
+} from '@/stores'
 import { errorMessage } from '@/utils/error'
 import type { ViewType } from '@/protocol/types'
 import {
@@ -135,6 +198,8 @@ const channelMeta = computed(() =>
 const channelLabel = computed(() =>
   channelMeta.value?.portName || channelId.value || '未选择通道'
 )
+
+const txPanel = computed(() => workspace.getTxPanel(channelId.value))
 
 const isSerial = computed(() => channelMeta.value?.transportType === 'serial')
 
@@ -180,13 +245,44 @@ watch(
 )
 
 function onAddView(info: { key: string }) {
-  const type = info.key as ViewType
-  workspace.addView(channelId.value, type)
+  workspace.addView(channelId.value, info.key as ViewType)
 }
 
 function onEditTab(targetKey: string | MouseEvent | KeyboardEvent, action: string) {
   if (action !== 'remove' || typeof targetKey !== 'string') return
   workspace.closeView(channelId.value, targetKey)
+}
+
+function onFloatingOpenChange(open: boolean) {
+  if (!channelId.value) return
+  if (open) workspace.openTxPanel(channelId.value)
+  else workspace.closeTxPanel(channelId.value)
+}
+
+/** 拖拽左边调节宽度（停靠与浮动共用） */
+function onResizeStart(e: MouseEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+  const startX = e.clientX
+  const startW = txPanel.value.width
+  const onMove = (ev: MouseEvent) => {
+    // 右侧面板：向左拖变宽
+    const next = startW + (startX - ev.clientX)
+    workspace.setTxPanelWidth(
+      channelId.value,
+      Math.min(TX_PANEL_WIDTH_MAX, Math.max(TX_PANEL_WIDTH_MIN, next)),
+    )
+  }
+  const onUp = () => {
+    document.removeEventListener('mousemove', onMove)
+    document.removeEventListener('mouseup', onUp)
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+  }
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+  document.addEventListener('mousemove', onMove)
+  document.addEventListener('mouseup', onUp)
 }
 
 function onGlobalKey(e: KeyboardEvent) {
@@ -214,6 +310,8 @@ onUnmounted(() => {
 
 <style scoped>
 .channel-workspace { display: flex; flex-direction: column; height: calc(100vh - 180px); min-height: 420px; }
+.ws-body { display: flex; flex: 1; min-height: 0; min-width: 0; }
+.tabs-area { flex: 1; min-width: 0; }
 .ws-header {
   display: flex;
   align-items: center;
@@ -248,4 +346,69 @@ onUnmounted(() => {
   font-size: 12px;
 }
 .immersive-hint { margin-left: auto; color: rgba(255, 255, 255, 0.45); }
+
+.tx-dock {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: calc(100vh - 260px);
+  min-height: 360px;
+  border-left: 1px solid #f0f0f0;
+  background: #fff;
+  margin-left: 4px;
+}
+.tx-panel-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #f0f0f0;
+}
+.tx-panel-title { font-weight: 600; margin-right: auto; }
+.tx-panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 8px;
+}
+.tx-resize-handle {
+  position: absolute;
+  left: -3px;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 2;
+}
+.tx-resize-handle:hover,
+.tx-resize-handle:active {
+  background: rgba(22, 119, 255, 0.35);
+}
+</style>
+
+<style>
+/* Drawer 挂 body；左缘拖拽条 + 内容滚动 */
+.tx-send-drawer .ant-drawer-body {
+  position: relative;
+  padding: 12px;
+  height: 100%;
+  overflow: auto;
+}
+.tx-send-drawer .drawer-handle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 10;
+}
+.tx-send-drawer .drawer-handle:hover,
+.tx-send-drawer .drawer-handle:active {
+  background: rgba(22, 119, 255, 0.35);
+}
 </style>

@@ -36,7 +36,7 @@
 
         <a-card title="工作区整包" size="small" :bordered="false" style="margin-top: 16px">
           <p class="hint">
-            导出/导入规则 + 当前通道视图模板 + 定时发送列表 + 帧配置（YAML/JSON）。仍不保存易变连接。
+            导出/导入规则 + 当前通道视图模板 + 定时发送列表（YAML/JSON）。仍不保存易变连接。旧包中的帧配置字段会保留读取但不再生效。
           </p>
           <a-space wrap>
             <a-button type="primary" @click="exportPackage('yaml')">导出 YAML</a-button>

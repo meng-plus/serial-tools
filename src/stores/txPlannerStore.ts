@@ -7,24 +7,16 @@ import {
   type TxListItem,
   type TxListTemplate,
 } from '@/workspace/schema'
-import { CHECKSUM_CATALOG } from '@/protocol/checksum'
 
 export function itemTimerKey(channelId: string, itemId: string) {
   return `${channelId}::${itemId}`
 }
 
-/** 帧配置 + 按条目独立定时发送 */
+/** 定时发送；frameProfiles 仅兼容旧 workspace 导入导出 */
 export const useTxPlannerStore = defineStore('txPlanner', () => {
-  const frameProfiles = ref<FrameProfile[]>(
-    CHECKSUM_CATALOG.filter(c => c.id !== 'none').map(c => ({
-      id: c.id,
-      name: `${c.name}（末尾）`,
-      checksum: c.id,
-      seqOffset: -1,
-    })),
-  )
+  const frameProfiles = ref<FrameProfile[]>([])
   const listsByChannel = ref<Record<string, TxListTemplate>>({})
-  /** 帧配置自带 seqOffset 用 */
+  /** @deprecated 旧帧配置序号，发送路径已不用 */
   const seqByProfile = ref<Record<string, number>>({})
   /** 条目序号 {{seq}} */
   const seqByItem = ref<Record<string, number>>({})

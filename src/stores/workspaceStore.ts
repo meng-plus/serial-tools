@@ -15,6 +15,21 @@ const VIEW_TITLES: Record<ViewType, string> = {
 
 let viewSeq = 0
 
+/** 定时发送面板：浮动抽屉 / 右侧停靠；宽度可拖拽 */
+export interface TxPanelState {
+  open: boolean
+  docked: boolean
+  width: number
+}
+
+export const TX_PANEL_WIDTH_MIN = 360
+export const TX_PANEL_WIDTH_MAX = 900
+export const TX_PANEL_WIDTH_DEFAULT = 560
+
+function clampTxWidth(w: number): number {
+  return Math.min(TX_PANEL_WIDTH_MAX, Math.max(TX_PANEL_WIDTH_MIN, Math.round(w)))
+}
+
 function defaultViews(channelId: string): ViewInstance[] {
   return [
     {
@@ -34,6 +49,67 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const activeViewIdByChannel = ref<Record<string, string>>({})
   /** 当前活动视图沉浸铺满窗口（F11） */
   const viewImmersive = ref(false)
+
+  /** 定时发送面板：浮动抽屉 / 右侧停靠；宽度可拖拽 */
+  const txPanelByChannel = ref<Record<string, TxPanelState>>({})
+
+  function ensureTxPanel(channelId: string): TxPanelState {
+    const cur = txPanelByChannel.value[channelId]
+    if (cur) return cur
+    const fresh: TxPanelState = {
+      open: false,
+      docked: false,
+      width: TX_PANEL_WIDTH_DEFAULT,
+    }
+    txPanelByChannel.value = { ...txPanelByChannel.value, [channelId]: fresh }
+    return fresh
+  }
+
+  function getTxPanel(channelId: string): TxPanelState {
+    return (
+      txPanelByChannel.value[channelId] || {
+        open: false,
+        docked: false,
+        width: TX_PANEL_WIDTH_DEFAULT,
+      }
+    )
+  }
+
+  function isTxPanelOpen(channelId: string): boolean {
+    return !!txPanelByChannel.value[channelId]?.open
+  }
+
+  function patchTxPanel(channelId: string, patch: Partial<TxPanelState>) {
+    if (!channelId) return
+    const cur = ensureTxPanel(channelId)
+    const next: TxPanelState = {
+      open: patch.open ?? cur.open,
+      docked: patch.docked ?? cur.docked,
+      width: clampTxWidth(patch.width ?? cur.width),
+    }
+    txPanelByChannel.value = { ...txPanelByChannel.value, [channelId]: next }
+  }
+
+  function openTxPanel(channelId: string) {
+    patchTxPanel(channelId, { open: true })
+  }
+
+  function closeTxPanel(channelId: string) {
+    patchTxPanel(channelId, { open: false })
+  }
+
+  function toggleTxPanel(channelId: string) {
+    if (isTxPanelOpen(channelId)) closeTxPanel(channelId)
+    else openTxPanel(channelId)
+  }
+
+  function setTxPanelDocked(channelId: string, docked: boolean) {
+    patchTxPanel(channelId, { docked, open: true })
+  }
+
+  function setTxPanelWidth(channelId: string, width: number) {
+    patchTxPanel(channelId, { width })
+  }
 
   function setViewImmersive(on: boolean) {
     viewImmersive.value = on
@@ -74,12 +150,25 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         [channelId]: views[0].id,
       }
     } else {
-      // 同步展示名（如 terminal → 收发日志）
-      const list = viewsByChannel.value[channelId].map(v => ({
-        ...v,
-        title: VIEW_TITLES[v.type] || v.title,
-      }))
+      // 同步展示名；旧 tx_list Tab 迁移为右侧抽屉
+      const prev = viewsByChannel.value[channelId]
+      const hadTxList = prev.some(v => v.type === 'tx_list')
+      let list: ViewInstance[] = prev
+        .filter(v => v.type !== 'tx_list')
+        .map(v => ({
+          ...v,
+          title: VIEW_TITLES[v.type] || v.title,
+        }))
+      if (list.length === 0) list = defaultViews(channelId)
       viewsByChannel.value = { ...viewsByChannel.value, [channelId]: list }
+      const curActive = activeViewIdByChannel.value[channelId]
+      if (!list.some(v => v.id === curActive)) {
+        activeViewIdByChannel.value = {
+          ...activeViewIdByChannel.value,
+          [channelId]: list[0].id,
+        }
+      }
+      if (hadTxList) openTxPanel(channelId)
     }
   }
 
@@ -90,6 +179,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   function addView(channelId: string, type: ViewType, config: Record<string, unknown> = {}) {
+    // 定时发送已改为右侧抽屉，不再作为视图 Tab
+    if (type === 'tx_list') {
+      openTxPanel(channelId)
+      return null
+    }
     ensureChannel(channelId)
     const initialConfig =
       type === 'chart'
@@ -139,6 +233,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     viewsByChannel.value = rest
     const { [channelId]: __, ...restActive } = activeViewIdByChannel.value
     activeViewIdByChannel.value = restActive
+    const { [channelId]: ___, ...restPanel } = txPanelByChannel.value
+    txPanelByChannel.value = restPanel
     if (activeChannelId.value === channelId) {
       activeChannelId.value = ''
       exitViewImmersive()
@@ -167,7 +263,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     channelId: string,
     templates: { type: ViewType; title?: string; config?: Record<string, unknown> }[],
   ) {
-    const views: ViewInstance[] = (templates.length ? templates : [{ type: 'terminal' as ViewType }]).map(t => ({
+    const hadTxList = templates.some(t => t.type === 'tx_list')
+    const cleaned = templates.filter(t => t.type !== 'tx_list')
+    const views: ViewInstance[] = (cleaned.length ? cleaned : [{ type: 'terminal' as ViewType }]).map(t => ({
       id: `view-${++viewSeq}`,
       type: t.type,
       channelId,
@@ -179,6 +277,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       ...activeViewIdByChannel.value,
       [channelId]: views[0].id,
     }
+    if (hadTxList) openTxPanel(channelId)
   }
 
   return {
@@ -198,5 +297,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     updateViewConfig,
     replaceViewsFromTemplates,
     VIEW_TITLES,
+    openTxPanel,
+    closeTxPanel,
+    toggleTxPanel,
+    isTxPanelOpen,
+    getTxPanel,
+    setTxPanelDocked,
+    setTxPanelWidth,
   }
 })

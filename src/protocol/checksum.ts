@@ -27,7 +27,7 @@ export interface ChecksumCatalogEntry {
   hint?: string
 }
 
-/** UI / 帧配置下拉同源 */
+/** UI 校验算法下拉同源 */
 export const CHECKSUM_CATALOG: ChecksumCatalogEntry[] = [
   { id: 'none', name: '无', size: 0, defaultEndian: 'na' },
   { id: 'sum8', name: '累加和 8 位', size: 1, defaultEndian: 'na', hint: '单字节，无端序' },

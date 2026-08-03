@@ -22,6 +22,7 @@ export interface DisplayConfig {
   showTimestamp: boolean
   showDirection: boolean
   showChannel: boolean
+  showTx: boolean
 }
 
 interface SendResult {
@@ -44,6 +45,7 @@ export const useTerminalStore = defineStore('terminal', () => {
     showTimestamp: true,
     showDirection: true,
     showChannel: true,
+    showTx: true,
   })
   let lineIdCounter = 0
   let unsub: (() => void) | null = null
@@ -54,18 +56,22 @@ export const useTerminalStore = defineStore('terminal', () => {
   const lines = ref<TerminalLine[]>([])
 
   const filteredLines = computed(() => {
-    if (!activeChannelId.value) return lines.value
+    const showTxSend = displayConfig.value.showTx
+    const pool = lines.value
+    if (!activeChannelId.value) return showTxSend ? pool : pool.filter(l => l.direction === 'rx')
     const selected = activeChannelId.value
     if (selected.startsWith('tcp_server-')) {
       const conn = useConnectionStore()
       const clientIds = new Set(
         conn.getServerClients(selected).map(c => c.channelId)
       )
-      return lines.value.filter(
-        l => l.channelId === selected || clientIds.has(l.channelId)
+      return pool.filter(
+        l =>
+          (showTxSend || l.direction === 'rx') &&
+          (l.channelId === selected || clientIds.has(l.channelId)),
       )
     }
-    return lines.value.filter(l => l.channelId === selected)
+    return pool.filter(l => (showTxSend || l.direction === 'rx') && l.channelId === selected)
   })
 
   const rxCount = computed(() =>
