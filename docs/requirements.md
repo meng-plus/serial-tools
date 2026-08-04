@@ -71,7 +71,7 @@
 - 厂家自定义二进制：定界符 / 长度域 / 静默超时分帧 + 字段表 + 常用校验（已落地）
 - 一条匹配规则可配置多个提取字段（软上限 32）；监控/图表按各字段 `valueId` 订阅
 - 多字节数值类型与 CRC/累加和：UI 以「小端/大端 + 线序示例」展示，可单独改写校验写入端序
-- **协议扩展系统（protocol-ext，已交付）**：前端 JS 脚本 + manifest.yaml 定义协议，安装/启用无需重编译；声明式参数表单（含 `file` 文件参数）、动作、变量表；协议实例绑定通道运行；内置 Modbus RTU/TCP 主站+从站参考实现（本地主从闭环自测）、三类模板、演示包；网格布局协议仪表盘；参数导入导出（YAML/JSON/CSV 表格）、读取数据导出（CSV/JSON）；工作区持久化协议实例。YMODEM 文件传输（双向下发/读取固件文件）为手动安装演示包。详见 [protocol-ext/](./protocol-ext/README.md)
+- **协议扩展系统（protocol-ext，已交付）**：前端 JS 脚本 + manifest.yaml 定义协议，安装/启用无需重编译；声明式参数表单（含 `file` 文件参数）、动作、变量表；协议实例绑定通道运行；内置 Modbus RTU/TCP 主站+从站参考实现（本地主从闭环自测）、三类模板、演示包；实例自动生成协议面板（寄存器网格，双击写值）；参数导入导出（YAML/JSON/CSV 表格）、读取数据导出（CSV/JSON）；工作区持久化协议实例。YMODEM 文件传输（双向下发/读取固件文件）为手动安装演示包。详见 [protocol-ext/](./protocol-ext/README.md)
 - **不做**完整 Modbus RTU/TCP 产品化（请用 Modbus Poll / Slave 等专用工具）；`CRC16-Modbus` 仅作为通用校验算法提供
 - JSON 数据字段提取
 - 正则表达式文本匹配
@@ -223,5 +223,5 @@ Transport.read() → 读线程 → packets 缓冲 + rx_broadcast 广播
 - [x] 串口超时断包参数可配置（设置默认 + 通道顶栏运行中可改）
 - [x] 日志录制 BIN/CSV/HEX/TXT 格式（通道级，RX/TX 分文件）
 - [x] 协议解析：正则 / JSON / 厂家二进制帧（前端）；不做完整 Modbus 产品
-- [x] 协议扩展系统：前端 JS + manifest 免重编译；安装/启停/参数导入导出/数据导出；协议仪表盘；内置 Modbus 主从参考实现 + 模板 + 演示包（见 docs/protocol-ext/）
+- [x] 协议扩展系统：前端 JS + manifest 免重编译；安装/启停/参数导入导出/数据导出；协议实例面板（寄存器网格、双击写值）；内置 Modbus 主从参考实现 + 模板 + 演示包（见 docs/protocol-ext/）
 - [ ] 转发器面板 UI 完善（统计、状态实时更新）

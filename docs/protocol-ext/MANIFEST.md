@@ -88,7 +88,7 @@ ui:
 
 ## ui 变量表（variables，可选）
 
-运行时可用变量（供监控 / 图表下拉、仪表盘绑定）：
+运行时可用变量（供监控 / 图表下拉、协议面板绑定）：
 
 ```yaml
 ui:
@@ -100,7 +100,7 @@ ui:
 
 ## ui 动作表（actions，可选）
 
-仪表盘按钮 / 管理页触发：
+协议实例面板按钮 / 管理页触发：
 
 ```yaml
 ui:
@@ -111,13 +111,24 @@ ui:
 
 ## ui 仪表盘模板（dashboard，可选）
 
-初始布局控件（安装后「新建仪表盘」可自动带入）：
+协议实例面板的数据区模板（`register_grid` 寄存器网格，双击可写值；无模板时按角色自动生成）：
 
 ```yaml
 ui:
   dashboard:
-    - { id: d1, type: value, row: 0, col: 0, w: 4, h: 2, title: 温度, valueIds: ["temp"] }
-    - { id: b1, type: button, row: 0, col: 4, w: 2, h: 1, title: 读取, actionId: read_all }
+    - id: d1
+      type: register_grid
+      row: 0
+      col: 0
+      w: 12
+      h: 8
+      title: 寄存器
+      grid:
+        label: 寄存器
+        paramKey: poll
+        editable: true
+        writeAction: write_reg
+        writeArgs: { addr: "{addr}", reg: "{reg}", value: "{value}" }
 ```
 
 ## 完整最小示例

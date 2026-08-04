@@ -31,10 +31,10 @@
 - `setConfig` 已实现但参数仍旧：确认 setConfig 内重新读取参数（`_applyConfig()`）并重启定时器 / 清空 pending。
 - 修改参数 → 实例会自动调用 `setConfig(patch)`；若需要强推一轮，在 setConfig 里显式重发。
 
-## 监控/图表/仪表盘看不到数值
+## 监控/图表看不到数值
 
 - 变量必须经 `ctx.emitVar({ valueId, value })` 推送，且 `valueId` 要在变量表（manifest `ui.variables` 或 `getVariables()`）中。
-- 图表/仪表盘控件绑定的是 `valueIds`；确认拼写一致。
+- 图表控件绑定的是 `valueIds`；确认拼写一致。
 - 数据导出：仅导出已产生的样本；启动后无数据则导出为空表。
 
 ## 测试 / 构建相关

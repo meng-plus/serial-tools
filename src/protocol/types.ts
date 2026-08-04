@@ -110,7 +110,6 @@ export type ViewType =
   | 'tx_list'
   | 'chat'
   | 'vt100'
-  | 'protocol_dashboard'
   | 'protocol_panel'
 
 export interface ViewInstance {

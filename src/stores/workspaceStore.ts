@@ -10,7 +10,6 @@ const VIEW_TITLES: Record<ViewType, string> = {
   tx_list: '定时发送',
   chat: '对话',
   vt100: 'VT100',
-  protocol_dashboard: '协议仪表盘',
   protocol_panel: '协议实例',
 }
 
@@ -189,11 +188,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const initialConfig =
       type === 'chart'
         ? { valueIds: [] as string[], maxPoints: 100, ...config }
-        : type === 'protocol_dashboard'
-          ? { instanceId: '', controls: [] as unknown[], ...config }
-          : type === 'protocol_panel'
-            ? { instanceId: String(config.instanceId || ''), ...config }
-            : { ...config }
+        : type === 'protocol_panel'
+          ? { instanceId: String(config.instanceId || ''), ...config }
+          : { ...config }
     const view: ViewInstance = {
       id: `view-${++viewSeq}`,
       type,

@@ -54,7 +54,6 @@
               <a-menu-item key="chart">图表</a-menu-item>
               <a-menu-item key="chat">对话</a-menu-item>
               <a-menu-item key="vt100">VT100 终端</a-menu-item>
-              <a-menu-item key="protocol_dashboard">协议仪表盘</a-menu-item>
               <a-menu-item key="protocol_panel">协议实例</a-menu-item>
             </a-menu>
           </template>
@@ -94,11 +93,6 @@
                 <ChartView v-else-if="v.type === 'chart'" :channel-id="channelId" :view-id="v.id" />
                 <ChatView v-else-if="v.type === 'chat'" :channel-id="channelId" />
                 <Vt100View v-else-if="v.type === 'vt100'" :channel-id="channelId" :view-id="v.id" />
-                <ProtocolDashboardView
-                  v-else-if="v.type === 'protocol_dashboard'"
-                  :channel-id="channelId"
-                  :view-id="v.id"
-                />
                 <ProtocolPanelView
                   v-else-if="v.type === 'protocol_panel'"
                   :channel-id="channelId"
@@ -189,7 +183,6 @@ import ChartView from '@/views/ChartView.vue'
 import TxListView from '@/views/TxListView.vue'
 import ChatView from '@/views/ChatView.vue'
 import Vt100View from '@/views/Vt100View.vue'
-import ProtocolDashboardView from '@/views/ProtocolDashboardView.vue'
 import ProtocolPanelView from '@/views/ProtocolPanelView.vue'
 
 const route = useRoute()

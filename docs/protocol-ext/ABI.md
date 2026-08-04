@@ -13,7 +13,7 @@ main.js 是 ESM 模块，**默认导出**一个实现对象。不得 `import` �
 | `setConfig(patch)` | 可选 | 参数变更即时生效（例如清空 pending + 重启定时器 + 强制重发一轮） |
 | `match(frame)` | slave 必选 | 判断报文是否属于本设备（校验地址/长度/CRC） |
 | `handle(frame)` | slave 必选 | 匹配后解析并应答（`ctx.sendHex` 回发） |
-| `runAction(actionId, args)` | 可选 | 仪表盘按钮 / 管理页动作触发 |
+| `runAction(actionId, args)` | 可选 | 协议面板按钮 / 管理页动作触发 |
 | `getVariables()` | 可选 | 动态变量表（与 manifest `ui.variables` 并集） |
 `frame`（`RxRecord`）字段：
 
@@ -36,7 +36,7 @@ ctx = {
                               // 经 send_data 发送 hex（无后缀追加）；发送成功后自动推入 txHub
 
   emitVar({ valueId, value, unit?, timestamp? }): void,
-                              // 推送数值样本 → 监控 / 图表 / 数据导出 / 仪表盘（ruleId 固定为协议 id）
+                              // 推送数值样本 → 监控 / 图表 / 数据导出（ruleId 固定为协议 id）
 
   log(level: 'info'|'warn'|'error', msg: string): void,
                               // 写入协议运行日志（管理页显示）
@@ -82,7 +82,7 @@ ctx = {
 ## 关键约定
 
 - **发送数据一律走 `ctx.sendHex`**，不要调其它 invoke。应答 / 轮询报文都由它发出。
-- **数值必须经 `ctx.emitVar` 推送** 才能进监控 / 图表 / 数据导出 / 仪表盘。
+- **数值必须经 `ctx.emitVar` 推送** 才能进监控 / 图表 / 数据导出。
 - **从站用 `match`+`handle`**（不要在从站里写 `onRx`，运行时按 role 分发）。`match` 内做完整校验（地址、长度、CRC），保证无关报文不误处理。
 - `onTick` 不要做重型计算；50ms 粒度足够超时重试等轻量逻辑。
 - `setConfig` 在参数变更后立即调用，通常需要：清空 in-flight 请求 → 重启定时器 → 强制重发一轮，避免参数生效滞后。

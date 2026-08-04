@@ -47,7 +47,7 @@ YMODEM 文件传输（双向、固件升级/备份）：`public/protocols/demo/y
 - **协议包（ProtocolPackage）**：一个目录（含 manifest + 实现），可被创建实例。
 - **实例（ProtocolInstance）**：协议包 + 某个通道 + 一套参数。同一协议可在多个通道上各自运行。
 - **角色（role）**：`passive`（被动解析）/ `master`（主动轮询）/ `slave`（应答式）。
-- **扩展点**：`ctx.emitVar` 推送数值样本 → 监控 / 图表 / 数据导出 / 仪表盘订阅；`ctx.sendHex` 发送数据。
+- **扩展点**：`ctx.emitVar` 推送数值样本 → 监控 / 图表 / 数据导出订阅；`ctx.sendHex` 发送数据。
 
 ## 架构总览
 
@@ -55,7 +55,6 @@ YMODEM 文件传输（双向、固件升级/备份）：`public/protocols/demo/y
 ┌────────────────────────────── 前端 ──────────────────────────────┐
 │  ProtocolPage（管理页）                                           │
 │    │ 安装 zip / 创建实例 / 启停 / 参数导入导出 / 数据导出 / 日志     │
-│  ProtocolDashboardView（仪表盘：网格布局，绑实例 + 控件）            │
 │                                                                    │
 │  useProtocolRuntime（pinia store, src/protocol-ext/manager.ts）    │
 │    ├─ loader：加载内置(fetch) / 用户包(IPC) 的 manifest + main.js  │
