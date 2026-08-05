@@ -14,6 +14,9 @@ use transport::Transport;
 use crate::domain::packet_store::RxBroadcastEvent;
 use crate::error::CommandError;
 
+/// 组匹配闭包：tcp_server 组订阅用，动态判断子客户端是否属于该组
+pub type GroupMatch = Arc<dyn Fn(&str) -> bool + Send + Sync>;
+
 /// 订阅方向
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum BusDirection {
@@ -33,6 +36,8 @@ pub struct BusEvent {
 pub struct BusSubscription {
     pub channel_id: String,
     pub direction: BusDirection,
+    /// 是否「组订阅」：channel_id 为逻辑组（如 tcp_server-*），实际覆盖其动态子通道
+    pub is_group: bool,
 }
 
 /// 单条总线的运行时状态
@@ -107,6 +112,10 @@ impl BusRegistry {
     }
 
     /// 订阅通道到总线；错误信息返回给命令层透传
+    ///
+    /// `group_match`：可选「组匹配」闭包（tcp_server 组订阅用）。
+    /// 为 None 时按 channel_id 精确匹配；为 Some(f) 时按 f(evt.channel_id) 判断是否属于该订阅。
+    /// 组订阅适合「一个逻辑通道覆盖动态子通道」（如 TCP Server 覆盖所有 tcp_client-*）。
     pub async fn subscribe(
         &self,
         bus_id: &str,
@@ -114,6 +123,7 @@ impl BusRegistry {
         direction: &BusDirection,
         transport: Arc<dyn Transport>,
         rx: broadcast::Receiver<RxBroadcastEvent>,
+        group_match: Option<GroupMatch>,
     ) -> Result<(), CommandError> {
         let mut buses = self.buses.write().await;
         let bus = buses
@@ -133,10 +143,12 @@ impl BusRegistry {
             )));
         }
 
-        Self::spawn_subscription_threads(bus, channel_id, direction, transport, rx);
+        let is_group = group_match.is_some();
+        Self::spawn_subscription_threads(bus, channel_id, direction, transport, rx, group_match);
         bus.subscriptions.push(BusSubscription {
             channel_id: channel_id.to_string(),
             direction: direction.clone(),
+            is_group,
         });
         Ok(())
     }
@@ -228,12 +240,14 @@ impl BusRegistry {
     }
 
     /// 为一条已存在的订阅重建线程（配合 `start` 使用，通道必须是保留订阅之一）
+    #[allow(clippy::too_many_arguments)]
     pub async fn resume_subscription(
         &self,
         bus_id: &str,
         channel_id: &str,
         transport: Arc<dyn Transport>,
         rx: broadcast::Receiver<RxBroadcastEvent>,
+        group_match: Option<GroupMatch>,
     ) -> Result<(), CommandError> {
         let mut buses = self.buses.write().await;
         let bus = buses
@@ -255,7 +269,7 @@ impl BusRegistry {
                 CommandError::InvalidRequest(format!("通道 {} 不在总线订阅记录中", channel_id))
             })?;
 
-        Self::spawn_subscription_threads(bus, channel_id, &direction, transport, rx);
+        Self::spawn_subscription_threads(bus, channel_id, &direction, transport, rx, group_match);
         Ok(())
     }
 
@@ -276,12 +290,14 @@ impl BusRegistry {
     }
 
     /// 为一条订阅生成 RxToBus / TxFromBus 线程（Bus 持有写锁时调用）
+    #[allow(clippy::too_many_arguments)]
     fn spawn_subscription_threads(
         bus: &mut DataBus,
         channel_id: &str,
         direction: &BusDirection,
         transport: Arc<dyn Transport>,
         rx: broadcast::Receiver<RxBroadcastEvent>,
+        group_match: Option<GroupMatch>,
     ) {
         let channel_id = channel_id.to_string();
         let bus_tx = bus.bus_tx.clone();
@@ -293,7 +309,7 @@ impl BusRegistry {
         let rx_bytes = bus.rx_bytes.clone();
         let tx_bytes = bus.tx_bytes.clone();
 
-        // RxToBus / Both：订阅全局 RX 广播，按 channel_id 过滤后推入总线
+        // RxToBus / Both：订阅全局 RX 广播，按 channel_id（或组匹配）过滤后推入总线
         if *direction == BusDirection::RxToBus || *direction == BusDirection::Both {
             let mut rx = rx;
             let bus_tx_clone = bus_tx.clone();
@@ -301,6 +317,7 @@ impl BusRegistry {
             let sub_cancel_clone = sub_cancel.clone();
             let cid = channel_id.clone();
             let rx_counter = rx_bytes.clone();
+            let group = group_match.clone();
 
             let handle = std::thread::spawn(move || {
                 loop {
@@ -311,7 +328,12 @@ impl BusRegistry {
                     }
                     match rx.try_recv() {
                         Ok(evt) => {
-                            if evt.channel_id == cid {
+                            // 精确匹配 或 组匹配（tcp_server 组覆盖所有子客户端，含动态新接入）
+                            let matched = match &group {
+                                Some(f) => f(&evt.channel_id),
+                                None => evt.channel_id == cid,
+                            };
+                            if matched {
                                 let n = evt.bytes.len() as u64;
                                 let _ = bus_tx_clone.send(BusEvent {
                                     source_channel_id: cid.clone(),
@@ -456,5 +478,62 @@ mod tests {
         let got = rx.try_recv().unwrap();
         assert_eq!(got.source_channel_id, "A");
         assert_eq!(got.bytes, b"hi");
+    }
+
+    /// 组订阅：group_match 匹配 tcp_client-*，push_rx 后总线应收到事件
+    #[tokio::test]
+    async fn group_subscription_rxtobus_matches_dynamic_clients() {
+        use crate::domain::packet_store::PacketStore;
+        use std::sync::Arc;
+
+        let reg = BusRegistry::new();
+        let bus_id = reg.create("tcp-group").await;
+
+        // 订阅 TCP Server 组（group_match 匹配 tcp_client- 前缀）
+        let mut mock = transport::mock::MockTransport::new("tcp_server", "server");
+        mock.open().unwrap();
+        let transport: Arc<dyn transport::Transport> = Arc::new(mock);
+
+        let store = PacketStore::new();
+        let group: GroupMatch = Arc::new(|cid: &str| cid.starts_with("tcp_client-"));
+
+        reg.subscribe(
+            &bus_id,
+            "tcp_server-0.0.0.0:4001",
+            &BusDirection::RxToBus,
+            transport,
+            store.subscribe_rx(),
+            Some(group),
+        )
+        .await
+        .unwrap();
+
+        // 订阅总线输出
+        let buses = reg.buses.read().await;
+        let bus = buses.get(&bus_id).unwrap();
+        let mut bus_rx = bus.bus_tx.subscribe();
+        drop(buses);
+
+        // 模拟 tcp_client-X 子通道收到数据（新接入客户端也能匹配）
+        store
+            .push_rx(
+                "tcp_client-192.168.3.10:5001",
+                b"hi".to_vec(),
+                "t0",
+                None,
+                None,
+            )
+            .await;
+        store
+            .push_rx("serial-COM18", b"no".to_vec(), "t0", None, None)
+            .await;
+
+        // 等待线程处理
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let evt = bus_rx.try_recv().unwrap();
+        assert_eq!(evt.bytes, b"hi"); // 只有 tcp_client 事件进总线
+
+        reg.stop(&bus_id).await.unwrap();
+        reg.delete(&bus_id).await.unwrap();
     }
 }

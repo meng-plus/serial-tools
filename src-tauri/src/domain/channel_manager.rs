@@ -124,6 +124,11 @@ impl ChannelManager {
         self.client_parents.read().await.get(client_id).cloned()
     }
 
+    /// 同步查询父通道（总线订阅线程内使用；阻塞锁但持锁时间极短）
+    pub fn parent_of_sync(&self, client_id: &str) -> Option<String> {
+        self.client_parents.blocking_read().get(client_id).cloned()
+    }
+
     pub async fn remove_parent(&self, client_id: &str) {
         self.client_parents.write().await.remove(client_id);
     }

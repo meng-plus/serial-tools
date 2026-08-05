@@ -3,9 +3,10 @@
 //! 点对点转发 = 2 个通道订阅同一总线（A:RxToBus, B:TxFromBus）
 //! 广播 = 1 个 RxToBus + N 个 TxFromBus
 
-use crate::domain::bus_registry::BusDirection;
+use crate::domain::bus_registry::{BusDirection, GroupMatch};
 use crate::error::CommandError;
 use crate::state::AppState;
+use std::sync::Arc;
 use tauri::State;
 
 #[derive(serde::Deserialize)]
@@ -71,6 +72,56 @@ pub async fn subscribe_bus(
         }
     };
 
+    // TCP Server 作为「组订阅」：RxToBus 动态覆盖其所有子客户端（含新接入），
+    // TxFromBus 由主通道 write 广播给所有客户端。
+    // UI 只呈现 tcp_server 一个订阅项，子客户端自动归组。
+    let is_server = request.channel_id.starts_with("tcp_server-");
+    if is_server {
+        let channels = state.channels.clone();
+        let server_id = request.channel_id.clone();
+        // 组匹配闭包：某事件 channel_id 属于该 server 的子客户端
+        let group_match: GroupMatch = Arc::new(move |cid: &str| {
+            cid.starts_with("tcp_client-")
+                && channels.parent_of_sync(cid).as_deref() == Some(server_id.as_str())
+        });
+
+        // 组订阅一次（RxToBus 动态覆盖子客户端；TxFromBus 广播）
+        let transport = state
+            .channels
+            .get_transport(&request.channel_id)
+            .await
+            .ok_or_else(|| CommandError::ChannelNotFound(request.channel_id.clone()))?;
+        state
+            .buses
+            .subscribe(
+                &request.bus_id,
+                &request.channel_id,
+                &direction,
+                transport,
+                state.packets.subscribe_rx(),
+                Some(group_match),
+            )
+            .await?;
+
+        state
+            .log(
+                "info",
+                crate::domain::log_source::LogSource::Bus,
+                &format!(
+                    "TCP Server {} 组订阅总线 [{}] ({})",
+                    request.channel_id,
+                    request.bus_id,
+                    dir_str(&direction)
+                ),
+            )
+            .await;
+        return Ok(BusResponse {
+            success: true,
+            bus_id: request.bus_id,
+            message: "TCP Server 已订阅（动态覆盖全部子客户端，新接入自动加入）".to_string(),
+        });
+    }
+
     let transport = state
         .channels
         .get_transport(&request.channel_id)
@@ -85,14 +136,9 @@ pub async fn subscribe_bus(
             &direction,
             transport,
             state.packets.subscribe_rx(),
+            None,
         )
         .await?;
-
-    let dir_str = match direction {
-        BusDirection::RxToBus => "rx_to_bus",
-        BusDirection::TxFromBus => "tx_from_bus",
-        BusDirection::Both => "both",
-    };
 
     state
         .log(
@@ -100,7 +146,9 @@ pub async fn subscribe_bus(
             crate::domain::log_source::LogSource::Bus,
             &format!(
                 "通道 {} 订阅总线 [{}] ({})",
-                request.channel_id, request.bus_id, dir_str
+                request.channel_id,
+                request.bus_id,
+                dir_str(&direction)
             ),
         )
         .await;
@@ -112,6 +160,14 @@ pub async fn subscribe_bus(
     })
 }
 
+fn dir_str(direction: &BusDirection) -> &'static str {
+    match direction {
+        BusDirection::RxToBus => "rx_to_bus",
+        BusDirection::TxFromBus => "tx_from_bus",
+        BusDirection::Both => "both",
+    }
+}
+
 /// 取消订阅
 #[tauri::command]
 pub async fn unsubscribe_bus(
@@ -119,6 +175,7 @@ pub async fn unsubscribe_bus(
     channel_id: String,
     state: State<'_, AppState>,
 ) -> Result<BusResponse, CommandError> {
+    // tcp_server 为组订阅（单条记录），直接取消即断开其全部子客户端
     state.buses.unsubscribe(&bus_id, &channel_id).await?;
 
     state
@@ -157,6 +214,17 @@ pub async fn start_bus(
             .get_transport(&sub.channel_id)
             .await
             .ok_or_else(|| CommandError::ChannelNotFound(sub.channel_id.clone()))?;
+        // 组订阅（tcp_server）恢复时重新构造「子客户端匹配」闭包
+        let group_match: Option<GroupMatch> = if sub.is_group {
+            let channels = state.channels.clone();
+            let server_id = sub.channel_id.clone();
+            Some(Arc::new(move |cid: &str| {
+                cid.starts_with("tcp_client-")
+                    && channels.parent_of_sync(cid).as_deref() == Some(server_id.as_str())
+            }))
+        } else {
+            None
+        };
         state
             .buses
             .resume_subscription(
@@ -164,6 +232,7 @@ pub async fn start_bus(
                 &sub.channel_id,
                 transport,
                 state.packets.subscribe_rx(),
+                group_match,
             )
             .await?;
     }

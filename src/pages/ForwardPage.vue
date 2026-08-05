@@ -137,7 +137,14 @@ function directionLabel(d: string): string {
 
 function availableChannels(bus: BusInfo): string[] {
   const subscribed = new Set(bus.subscriptions.map(s => s.channel_id))
-  return Array.from(connectionStore.channels.keys()).filter(id => !subscribed.has(id))
+  return Array.from(connectionStore.channels.keys())
+    .filter(id => {
+      if (subscribed.has(id)) return false
+      // 若已订阅 tcp_server 组（覆盖全部子客户端），隐藏其 tcp_client-* 子通道
+      const covered = Array.from(subscribed).find(sid => sid.startsWith('tcp_server-'))
+      if (covered && id.startsWith('tcp_client-')) return false
+      return true
+    })
 }
 
 async function refreshBuses() {
