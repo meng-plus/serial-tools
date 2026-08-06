@@ -137,6 +137,11 @@ export const useProtocolRuntime = defineStore('protocolRuntime', () => {
     instances.value = instances.value.filter(i => i.instanceId !== instanceId)
     paramsByInstance.delete(instanceId)
     variablesByInstance.delete(instanceId)
+    // 删除实例必须清除模块/上下文缓存，否则重建同 id 实例会命中旧代码（改协议不生效）
+    moduleCache.delete(instanceId)
+    ctxCache.delete(instanceId)
+    timersByInstance.delete(instanceId)
+    lastTickByInstance.delete(instanceId)
   }
 
   /**
