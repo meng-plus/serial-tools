@@ -39,9 +39,7 @@
               <a-row :gutter="12">
                 <a-col :span="12">
                   <a-form-item label="波特率">
-                    <a-select v-model:value="form.baud_rate" style="width: 100%">
-                      <a-select-option v-for="b in baudRates" :key="b" :value="b">{{ b }}</a-select-option>
-                    </a-select>
+                    <BaudRateSelect v-model="form.baud_rate" />
                   </a-form-item>
                 </a-col>
                 <a-col :span="4">
@@ -190,6 +188,7 @@ import type { PortInfo } from '@/stores/connectionStore'
 import { portFullLabel as formatPortFullLabel, portDisplayName } from '@/utils/portLabel'
 import { errorMessage } from '@/utils/error'
 import { loadAppSettings, saveChannelTimeout } from '@/utils/appSettings'
+import BaudRateSelect from '@/components/BaudRateSelect.vue'
 
 const FORM_STORAGE_KEY = 'serial-tools-conn-form'
 const appDefaults = loadAppSettings()
@@ -200,8 +199,6 @@ const connecting = ref(false)
 
 const ports = computed(() => connectionStore.ports)
 const topLevelChannels = computed(() => connectionStore.topLevelChannels)
-
-const baudRates = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
 
 const typeLabels: Record<string, string> = {
   serial: '串口',

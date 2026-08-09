@@ -21,9 +21,7 @@
           </a-select>
         </a-form-item>
         <a-form-item label="默认波特率">
-          <a-select v-model:value="settings.defaultBaudRate" style="width: 220px">
-            <a-select-option v-for="b in baudRates" :key="b" :value="b">{{ b }}</a-select-option>
-          </a-select>
+          <BaudRateSelect v-model="settings.defaultBaudRate" style="width: 220px" />
         </a-form-item>
         <a-divider>串口超时分包（默认）</a-divider>
         <a-form-item label="字节间超时 byte_timeout（ms）">
@@ -50,9 +48,9 @@ import { reactive, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import { useTerminalStore } from '@/stores'
 import { loadAppSettings, saveAppSettings, type AppSettings } from '@/utils/appSettings'
+import BaudRateSelect from '@/components/BaudRateSelect.vue'
 
 const terminalStore = useTerminalStore()
-const baudRates = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
 
 const settings = reactive<AppSettings>({ ...loadAppSettings() })
 
