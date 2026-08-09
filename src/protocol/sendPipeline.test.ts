@@ -60,7 +60,13 @@ describe('runSendPipeline', () => {
 })
 
 describe('normalizeHexInput', () => {
-  it('strips junk and pretty prints', () => {
+  it('去分隔符并按字节空格分隔', () => {
     expect(normalizeHexInput('01-03 aa')).toBe('01 03 aa')
+  })
+
+  it('非法字符被剥离，0x 前缀不残留，非 prettify 只去分隔符', () => {
+    // 0x 前缀剥离后 AA 不因 x 字符导致字节错位
+    expect(normalizeHexInput('01 03 0xAA!')).toBe('01 03 AA')
+    expect(normalizeHexInput('01-03 aa', false)).toBe('0103aa')
   })
 })

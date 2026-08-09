@@ -118,9 +118,10 @@ export function runSendPipeline(input: SendPipelineInput): SendPipelineResult {
   }
 }
 
-/** HEX 粘贴：去空白后按字节插空格 */
+/** HEX 粘贴：去空白后按字节插空格。支持 0x 前缀（0xAA → aa），0x 本身被剥离不残留 */
 export function normalizeHexInput(raw: string, pretty = true): string {
-  const clean = raw.replace(/[^0-9a-fA-F]/g, '')
+  // 先剥离 0x / 0X 前缀标记，避免其 x 字符被当非法字符剥离后导致字节错位（0xAA → 0AA → 0A A）
+  const clean = raw.replace(/0x/gi, '').replace(/[^0-9a-fA-F]/g, '')
   if (!pretty) return clean
   return clean.replace(/(.{2})/g, '$1 ').trim()
 }
