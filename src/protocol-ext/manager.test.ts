@@ -1,5 +1,18 @@
 import { describe, it, expect } from 'vitest'
 import { parseCsvTable } from './manager'
+import { shouldHotReload } from './devReload'
+
+describe('shouldHotReload', () => {
+  it('首次采样不触发', () => {
+    expect(shouldHotReload(undefined, 100)).toBe(false)
+  })
+  it('mtime 变化时触发', () => {
+    expect(shouldHotReload(100, 200)).toBe(true)
+  })
+  it('mtime 相同不触发', () => {
+    expect(shouldHotReload(100, 100)).toBe(false)
+  })
+})
 
 describe('parseCsvTable', () => {
   it('解析表头 + 数据行', () => {

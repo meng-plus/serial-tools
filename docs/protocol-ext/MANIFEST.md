@@ -38,6 +38,7 @@ capabilities:
 |--------|------|
 | `key` | 参数名，运行时 `ctx.getParam(key)` 读取 |
 | `label` | 中文标签 |
+| `group` | 可选：参数分组名；同名参数在表单中归入同一分组（参数过多的协议用），未声明归默认分组 |
 | `type` | `number` / `text` / `bool` / `select` / `table` / `multiline` / `password` / `file` |
 | `default` | 默认值 |
 | `min/max/step` | number 类型 |
@@ -86,6 +87,33 @@ ui:
 - 参数值只保存 `{ name, size, token }` 元数据，真实字节在运行时瞬态缓存，**不写入工作区**，重启后需重新选择。
 - `ctx.getFile(key)` 返回 `{ name, bytes }`；未选择或缓存失效返回 `null`，协议需自行提示。
 
+## ui 参数预设（presets，可选）
+
+同一协议不同传感器/型号的默认参数集。创建实例时可快速选择预设，自动填充参数（仍可手动微调）。
+
+```yaml
+ui:
+  presets:
+    - id: hx711_50kg
+      label: HX711 50kg 称重传感器
+      params:
+        gain: 128
+        scale: 2100.5
+        filter: 10
+    - id: hx711_5kg
+      label: HX711 5kg 称重传感器
+      params:
+        gain: 128
+        scale: 920.3
+        filter: 20
+```
+
+- `id`：预设唯一标识（`^[a-z0-9_-]+$`）
+- `label`：显示名称（如传感器型号）
+- `params`：覆盖式默认参数（未声明的字段回退到 `ui.params` 的 `default`）
+- 创建实例向导步骤 3（参数配置）顶部出现「传感器型号 / 预设」下拉框；选择后自动填充对应默认参数
+- 预设只是参数默认值的具名集合，不改变协议逻辑（main.js 完全复用）
+
 ## ui 变量表（variables，可选）
 
 运行时可用变量（供监控 / 图表下拉、协议面板绑定）：
@@ -109,9 +137,61 @@ ui:
       label: 立即读取一轮
 ```
 
+## ui 分组表（groups，可选）
+
+参数 / 数据分区（卡片）定义。实例面板按本表渲染**分区卡片**：每个分组一张卡片，卡片头显示分组名 + 组内动作按钮，卡片体展示归属该组的寄存器网格控件。
+
+```yaml
+ui:
+  groups:
+    - id: device_a          # 分组 id；params[].group 与 dashboard[].group 引用它
+      label: 设备A          # 卡片标题
+      buttons:              # 可选：组内功能按钮（读取 / 写入数据，手动触发）
+        - id: read_all
+          label: 读取全部
+          kind: read         # read=读取 / write=写入（仅 UI 语义）
+          action: read_all   # 触发的 ui.actions 动作 id；缺省回退到按钮 id
+          args: { addr: "{addr}" }   # 可选：动作参数，支持 {addr} 等占位替换
+        - id: write_cfg
+          label: 写入配置
+          kind: write
+          action: write_cfg
+```
+
+- `params[].group`：参数表单的分组（可读性），同时决定参数属于哪个分区卡片。
+- `dashboard[].group`：控件归属哪个分区；未声明 group 的控件归「默认分区」。
+- 未声明 `groups` 时面板保持单一网格（向后兼容）。
+
 ## ui 仪表盘模板（dashboard，可选）
 
-协议实例面板的数据区模板（`register_grid` 寄存器网格，双击可写值；无模板时按角色自动生成）：
+协议实例面板的数据区模板。无模板时按角色自动生成（master/slave 为 `register_grid` 网格，passive 为变量网格 + 动作按钮行）。
+
+支持控件类型：
+
+| 控件 | 说明 |
+|------|------|
+| `register_grid` | 寄存器网格，双击可写值（见下方示例） |
+| `value` | 数据卡片：最新值 + 单位，点「历史」查看最近 200 条记录 |
+| `chart` | 波形图（echarts 折线，事件驱动刷新），绑定单个 valueId |
+| `info_panel` | 查询结果面板：展示 `emitInfo` 文本/状态（`keys` 过滤字段） |
+| `progress` | 长事务进度条：绑定 `progressId`（对应 `ctx.emitProgress.id`） |
+| `button` | 动作按钮（触发 `ui.actions` 中定义的动作） |
+
+## ui.queries（可选，声明式查询绑定）
+
+协议在 `onRx` 中解析出结构化 `data` 后调用 `ctx.applyQuery(actionId, data)`，框架按绑定写
+`emitInfo` / `setParam`，减少样板代码。`from` 支持点分路径；`format`：`text`（默认）/
+`hex` / `hex_size` / `bool_cn`。
+
+```yaml
+ui:
+  queries:
+    - action: q4201
+      info:
+        - { from: upgrade.addr_start, key: upgrade_addr_start, label: APP起始地址, format: hex }
+      setParam:
+        firmware_start: { from: upgrade.addr_start, format: hex }
+```
 
 ```yaml
 ui:
@@ -122,6 +202,7 @@ ui:
       col: 0
       w: 12
       h: 8
+      group: device_a       # 可选：归属的分区组 id
       title: 寄存器
       grid:
         label: 寄存器
@@ -129,6 +210,34 @@ ui:
         editable: true
         writeAction: write_reg
         writeArgs: { addr: "{addr}", reg: "{reg}", value: "{value}" }
+    - id: c1
+      type: value            # 数据卡片
+      row: 0
+      col: 0
+      w: 4
+      h: 3
+      group: device_a
+      title: 温度
+      valueIds: [temp]
+    - id: info1
+      type: info_panel       # 查询结果（emitInfo）
+      row: 3
+      col: 0
+      w: 12
+      h: 3
+      group: device_a
+      title: 设备信息
+      keys: [product_name, soft_version]
+    - id: ch1
+      type: chart            # 波形图
+      row: 0
+      col: 4
+      w: 8
+      h: 6
+      group: device_a
+      title: 温度波形
+      valueIds: [temp]
+      maxPoints: 200
 ```
 
 ## 完整最小示例

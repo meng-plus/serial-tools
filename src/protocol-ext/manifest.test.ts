@@ -70,6 +70,129 @@ describe('parseManifest', () => {
     expect(() => parseManifest('[]')).toThrow(ManifestError)
     expect(() => parseManifest('')).toThrow(ManifestError)
   })
+
+  it('解析 ui.groups 分组与组内动作按钮', () => {
+    const m = parseManifest(`
+id: grouped-protocol
+version: 1.0.0
+role: master
+ui:
+  groups:
+    - id: device_a
+      label: 设备A
+      buttons:
+        - { id: read_all, label: 读取全部, kind: read, action: read_all }
+        - { id: write_cfg, label: 写入配置, kind: write, action: write_cfg, args: { addr: "{addr}" } }
+        - { id: bad, label: "" }
+  dashboard:
+    - id: d1
+      type: register_grid
+      group: device_a
+      grid:
+        label: 寄存器
+`)
+    expect(m.ui.groups).toHaveLength(1)
+    const g = m.ui.groups![0]
+    expect(g.id).toBe('device_a')
+    expect(g.label).toBe('设备A')
+    expect(g.buttons).toHaveLength(3)
+    expect(g.buttons![0]).toEqual({ id: 'read_all', label: '读取全部', kind: 'read', action: 'read_all' })
+    expect(g.buttons![1]).toEqual({
+      id: 'write_cfg',
+      label: '写入配置',
+      kind: 'write',
+      action: 'write_cfg',
+      args: { addr: '{addr}' },
+    })
+    // 空 label 回退为按钮 id
+    expect(g.buttons![2]).toEqual({ id: 'bad', label: 'bad' })
+    expect(m.ui.dashboard?.[0].group).toBe('device_a')
+  })
+
+  it('解析 ui.queries 声明式绑定', () => {
+    const m = parseManifest(`
+id: q-demo
+version: 1.0.0
+ui:
+  queries:
+    - action: q4201
+      info:
+        - { from: upgrade.addr_start, key: upgrade_addr_start, label: APP, format: hex }
+      setParam:
+        firmware_start: { from: upgrade.addr_start, format: hex }
+`)
+    expect(m.ui.queries).toHaveLength(1)
+    expect(m.ui.queries![0].action).toBe('q4201')
+    expect(m.ui.queries![0].info?.[0]).toMatchObject({
+      from: 'upgrade.addr_start',
+      key: 'upgrade_addr_start',
+      format: 'hex',
+    })
+    expect(m.ui.queries![0].setParam?.firmware_start).toEqual({
+      from: 'upgrade.addr_start',
+      format: 'hex',
+    })
+  })
+
+  it('ui.groups 重复 id 去重', () => {
+    const m = parseManifest(`
+id: dup-group
+version: 1.0.0
+ui:
+  groups:
+    - { id: a, label: A }
+    - { id: a, label: B }
+`)
+    expect(m.ui.groups).toHaveLength(1)
+    expect(m.ui.groups![0].label).toBe('A')
+  })
+
+  it('解析 ui.presets 参数预设', () => {
+    const m = parseManifest(`
+id: preset-proto
+version: 1.0.0
+role: master
+ui:
+  presets:
+    - id: hx711_50kg
+      label: HX711 50kg 称重传感器
+      params:
+        gain: 128
+        scale: 2100.5
+    - id: hx711_5kg
+      label: HX711 5kg 称重传感器
+      params:
+        gain: 128
+        scale: 920.3
+    - id: empty
+      label: 空预设
+`)
+    expect(m.ui.presets).toHaveLength(3)
+    expect(m.ui.presets![0]).toEqual({
+      id: 'hx711_50kg',
+      label: 'HX711 50kg 称重传感器',
+      params: { gain: 128, scale: 2100.5 },
+    })
+    expect(m.ui.presets![1]).toEqual({
+      id: 'hx711_5kg',
+      label: 'HX711 5kg 称重传感器',
+      params: { gain: 128, scale: 920.3 },
+    })
+    expect(m.ui.presets![2]).toEqual({ id: 'empty', label: '空预设' })
+  })
+
+  it('ui.presets 重复 id 去重', () => {
+    const m = parseManifest(`
+id: dup-preset
+version: 1.0.0
+ui:
+  presets:
+    - { id: a, label: A }
+    - { id: a, label: B }
+`)
+    expect(m.ui.presets).toHaveLength(1)
+    expect(m.ui.presets![0].label).toBe('A')
+  })
 })
 
 describe('defaultParams', () => {

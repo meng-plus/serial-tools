@@ -238,6 +238,42 @@ BusSubscription { channel_id, direction: RxToBus | TxFromBus | Both }
 
 **理由**: 消除散落魔法字符串；序列化仍 `as_str()` 保持 snake_case，前端 `LogEntry.source: string` 零改动、契约不变。
 
-## 22. 版本更新检查
+## 23. 协议面板升级为可组合仪表盘
 
-**决策**: About 页提供「检查更新」：`checkForUpdate` 走 GitHub Releases API，`parseVersion` / `compareVersions` 为纯函数；打开外部链接经 Tauri shell（浏览器预览回退 `window.open`）。版本标识由构建期注入（`__APP_VERSION__` 等），发布流水线统一改写 package.json / tauri.conf.json。
+**决策**: 协议实例面板从单一寄存器网格升级为可组合仪表盘，支持分区卡片、数据卡片、波形图、读/写动作按钮。
+
+**背景**: 原有面板只渲染 `register_grid`，无法满足多设备分组、实时数据卡片、波形展示、手动读/写触发等需求。
+
+**核心设计**:
+- `ui.groups`：命名分区（卡片），每个分组含 id/label/buttons（读/写动作按钮）
+- `DashboardControl.group`：控件归属分区（register_grid / value / chart）
+- 面板渲染引擎按 `ui.groups` 分区渲染卡片；无 groups 时降级为单区（向后兼容）
+
+**控件类型**:
+| 控件 | 说明 |
+|------|------|
+| `register_grid` | 寄存器网格，双击写值 |
+| `value` | 数据卡片：最新值+单位+时间，历史抽屉（最近200条） |
+| `chart` | 波形图（echarts 折线，事件驱动刷新） |
+| `button` | 动作按钮（触发 `ui.actions`） |
+
+**实现**: 面板分区卡片 = 标题栏（分组名+组内按钮）+ 卡片体（控件渲染）。`SeriesChart.vue` 从 `ChartView` 抽取为可复用曲线组件。
+
+**理由**:
+- 分组（`groups`）= 可读性容器；组内按钮 = 读/写功能触发（非配置项）
+- `value` 卡片 + 历史抽屉 + `chart` 波形 = 高密度数据展示
+- `register_grid` 双击写值 + 组内 `writeAction` = 手动写入能力
+
+## 24. 实例面板生命周期跟随实例
+
+**决策**: `protocol_panel` 视图唯一且不可关闭；创建实例自动挂载，删除/切换通道时视图跟随生命周期。
+
+**背景**: 原有 `removeInstance` 只删除实例，不清理对应视图，导致孤儿面板（显示空态）。切换通道时视图留在旧通道，实例迁移后旧通道面板空态。
+
+**实现**:
+- `addView` 幂等：同一 instanceId 不重复创建面板
+- `closeView` 对 protocol_panel 不可关闭（UI 层 `closable` + store 层过滤）
+- `removeProtocolPanel(channelId, instanceId)`：清理实例面板（不受不可关闭限制），清空后回填默认终端
+- 切换通道时：旧通道移除面板，新通道 `ensureProtocolPanels` 自动补齐
+
+**理由**: 面板是实例的衍生物，生命周期必须跟随实例，避免 UI 孤儿状态。

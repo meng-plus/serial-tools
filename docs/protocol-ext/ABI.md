@@ -37,6 +37,27 @@ ctx = {
 
   emitVar({ valueId, value, unit?, timestamp? }): void,
                               // 推送数值样本 → 监控 / 图表 / 数据导出（ruleId 固定为协议 id）
+                              // **仅数值**；文本/状态请用 emitInfo
+
+  emitInfo({ key, text, label?, level? }): void,
+                              // 推送文本/状态查询结果 → 面板 info_panel（不进 valueBus）
+                              // level: 'info'|'warn'|'error'
+
+  emitProgress({ id, current, total, label?, done? }): void,
+                              // 长事务进度 → 面板 progress 控件（OTA / 文件传输）
+                              // done=true 表示结束（成功或失败）
+
+  applyQuery(actionId, data): boolean,
+                              // 按 manifest.ui.queries 将结构化 data 绑定到 emitInfo / setParam
+                              // data 支持点分路径（如 upgrade.addr_start）；无匹配返回 false
+
+  request({ hex, match, timeout?, retry? }): Promise<{ bytes, hex }>,
+                              // 主站请求–应答：sendHex 后等待本通道 rx 命中 match
+                              // timeout 默认 1000ms；retry 为额外重试次数；实例停止时取消
+
+  setParam(patch: Record<string, unknown>): void,
+                              // 合并回写实例参数 → 同步参数表单；实例运行中触发 setConfig
+                              // 用于查询结果落到可编辑配置（如 APP 起始地址）
 
   log(level: 'info'|'warn'|'error', msg: string): void,
                               // 写入协议运行日志（管理页显示）

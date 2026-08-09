@@ -72,7 +72,9 @@ pub fn run() {
             // 协议扩展包管理
             commands::protocol_fs::list_protocols,
             commands::protocol_fs::read_protocol_file,
+            commands::protocol_fs::protocol_content_mtime,
             commands::protocol_fs::install_protocol_zip,
+            commands::protocol_fs::link_protocol_dev,
             commands::protocol_fs::remove_protocol,
             // 更新检查
             commands::updater::check_for_update,

@@ -28,6 +28,8 @@ export interface ParamDef {
   key: string
   label: string
   type: ParamType
+  /** 可选：参数分组（同名 group 在表单中归入同一分组，便于参数过多的协议） */
+  group?: string
   default?: unknown
   min?: number
   max?: number
@@ -57,13 +59,49 @@ export interface VariableDef {
   addr?: number
 }
 
+/** 参数预设：同一协议不同传感器/型号的默认参数集（创建实例时可快速选择） */
+export interface PresetDef {
+  id: string
+  label: string
+  /** 覆盖式默认参数（未声明的字段回退到 ui.params 的 default） */
+  params?: Record<string, unknown>
+}
+
 export interface ActionDef {
   id: string
   label: string
   params?: ParamDef[]
 }
 
-export type ControlType = 'value' | 'button' | 'table' | 'chart' | 'text' | 'register_grid'
+/** 分组动作按钮：读取 / 写入数据（功能触发，非配置项） */
+export interface GroupButtonDef {
+  id: string
+  label: string
+  /** read=读取数据 / write=写入数据（UI 语义标注） */
+  kind?: 'read' | 'write'
+  /** 触发的动作 id（对应 ui.actions 中定义的 action） */
+  action?: string
+  /** 动作参数（支持 {addr} 等占位替换） */
+  args?: Record<string, string>
+}
+
+/** 参数 / 数据分区（卡片）定义：param.group 引用本组的 id */
+export interface GroupDef {
+  id: string
+  label: string
+  /** 组内功能按钮（读取 / 写入数据，手动触发） */
+  buttons?: GroupButtonDef[]
+}
+
+export type ControlType =
+  | 'value'
+  | 'button'
+  | 'table'
+  | 'chart'
+  | 'text'
+  | 'register_grid'
+  | 'info_panel'
+  | 'progress'
 
 /** 寄存器网格控件声明：行结构 + 实时值模式 + 双击写值映射（通用，不限定 Modbus） */
 export interface RegisterGridDef {
@@ -89,15 +127,44 @@ export interface DashboardControl {
   col: number
   w: number
   h: number
+  /** 可选：归属的分区组 id（ui.groups 中声明；未声明归默认分区） */
+  group?: string
   title?: string
   /** value / chart / table 绑定的变量 key（多个用逗号分隔的 valueIds） */
   valueIds?: string[]
+  /** chart 曲线的最大点数（截断历史缓冲窗口） */
+  maxPoints?: number
   /** button 触发的动作 id */
   actionId?: string
   actionParams?: Record<string, unknown>
   text?: string
   /** register_grid 专用声明 */
   grid?: RegisterGridDef
+  /** info_panel：要展示的 info key 列表；缺省展示该实例全部 */
+  keys?: string[]
+  /** progress：进度条 id（对应 ctx.emitProgress.id） */
+  progressId?: string
+}
+
+/** 声明式查询结果绑定（ui.queries） */
+export interface QueryInfoBinding {
+  from: string
+  key: string
+  label?: string
+  format?: 'text' | 'hex' | 'hex_size' | 'bool_cn'
+  level?: 'info' | 'warn' | 'error'
+}
+
+export interface QuerySetParamBinding {
+  from: string
+  format?: 'text' | 'hex' | 'hex_size' | 'bool_cn'
+}
+
+export interface QueryBindingDef {
+  /** 对应 ui.actions[].id / runAction 的 actionId */
+  action: string
+  info?: QueryInfoBinding[]
+  setParam?: Record<string, QuerySetParamBinding>
 }
 
 export interface ProtocolManifest {
@@ -114,16 +181,25 @@ export interface ProtocolManifest {
     params?: ParamDef[]
     variables?: VariableDef[]
     actions?: ActionDef[]
+    /** 参数预设（同一协议不同传感器/型号的默认参数集） */
+    presets?: PresetDef[]
+    /** 可选：参数 / 数据分区（卡片）定义；param.group 与 dashboard.group 引用其 id */
+    groups?: GroupDef[]
     dashboard?: DashboardControl[]
+    /**
+     * 声明式查询结果绑定：协议 parse 出结构化 data 后调 ctx.applyQuery(action, data)，
+     * 框架按 from 路径写 emitInfo / setParam。
+     */
+    queries?: QueryBindingDef[]
   }
 }
 
-/** 已安装协议包（内置或用户安装） */
+/** 已安装协议包（内置 / zip 安装 / Dev 文件夹链接） */
 export interface ProtocolPackage {
   manifest: ProtocolManifest
-  /** 来源：builtin=随应用打包 / user=数据目录用户安装 */
-  source: 'builtin' | 'user'
-  /** 用户包的绝对目录；builtin 为空 */
+  /** 来源：builtin=随应用打包 / user=zip 安装 / dev=本地文件夹链接 */
+  source: 'builtin' | 'user' | 'dev'
+  /** Dev 源目录绝对路径；其余为空 */
   dir?: string
 }
 
@@ -156,6 +232,34 @@ export interface ProtocolContext {
   emitVar(sample: { valueId: string; value: number; unit?: string; timestamp?: string }): void
   log(level: 'info' | 'warn' | 'error', msg: string): void
   getParam(key: string): unknown
+  /**
+   * 回写实例参数（合并 patch → 同步表单；运行中触发 setConfig）。
+   * 用于查询结果落到可编辑配置（如 APP 起始地址）。
+   */
+  setParam(patch: Record<string, unknown>): void
+  /**
+   * 推送文本/状态查询结果 → 面板 info_panel（不进入数值 valueBus）。
+   */
+  emitInfo(sample: { key: string; text: string; label?: string; level?: 'info' | 'warn' | 'error' }): void
+  /**
+   * 推送长事务进度 → 面板 progress 控件（OTA / 文件传输）。
+   */
+  emitProgress(sample: { id: string; current: number; total: number; label?: string; done?: boolean }): void
+  /**
+   * 按 manifest.ui.queries 将结构化结果绑定到 emitInfo / setParam。
+   * 无匹配绑定定义时返回 false。
+   */
+  applyQuery(actionId: string, data: Record<string, unknown>): boolean
+  /**
+   * 主站请求–应答：发送 hex，等待 match 命中本通道 rx；支持 timeout / retry。
+   * 实例停止时未完成的 request 会以「已取消」拒绝。
+   */
+  request(opts: {
+    hex: string
+    match: (frame: { bytes: number[]; hex: string; channelId: string }) => boolean
+    timeout?: number
+    retry?: number
+  }): Promise<{ bytes: number[]; hex: string }>
   /**
    * 读取 file 参数的真实字节。参数值只存元数据 { name, size, token }，
    * 这里按 token 从运行时瞬态缓存取回字节；未选择或缓存失效时返回 null。

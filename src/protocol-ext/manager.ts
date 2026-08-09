@@ -12,10 +12,12 @@ import {
   BUILTIN_PROTOCOL_IDS,
   loadBuiltinManifest,
   listUserPackages,
-  readEntrySource,
-  loadModuleFromSource,
+  loadProtocolModule,
 } from './loader'
-import { createContext, type RuntimeLogEntry } from './ctx'
+import { createContext, type ProtocolContextHandle, type RuntimeLogEntry } from './ctx'
+import { upsertInstanceInfo, type ProtocolInfoEntry } from './infoMap'
+import { upsertProgress, type ProtocolProgressEntry } from './progressMap'
+import { shouldHotReload } from './devReload'
 import type {
   ProtocolInstance,
   ProtocolModule,
@@ -47,14 +49,21 @@ export const useProtocolRuntime = defineStore('protocolRuntime', () => {
   const valueBus = useValueBus()
 
   const moduleCache = new Map<string, ProtocolModule>()
-  const ctxCache = new Map<string, ReturnType<typeof createContext>>()
+  const ctxCache = new Map<string, ProtocolContextHandle>()
   const timersByInstance = new Map<string, TimerRecord[]>()
   const paramsByInstance = new Map<string, Record<string, unknown>>()
   const variablesByInstance = new Map<string, VariableDef[]>()
   const lastTickByInstance = new Map<string, number>()
+  /** 实例查询结果（文本/状态），供 info_panel */
+  const infoByInstance = ref<Record<string, Record<string, ProtocolInfoEntry>>>({})
+  /** 长事务进度，供 progress 控件 */
+  const progressByInstance = ref<Record<string, Record<string, ProtocolProgressEntry>>>({})
 
   let unsubRx: (() => void) | null = null
   let tickTimer: ReturnType<typeof setInterval> | null = null
+  let devPollTimer: ReturnType<typeof setInterval> | null = null
+  const devMtimeById = new Map<string, number>()
+  let hotReloadBusy = false
 
   // ---------- 包管理 ----------
 
@@ -74,9 +83,88 @@ export const useProtocolRuntime = defineStore('protocolRuntime', () => {
       const byId = new Map<string, ProtocolPackage>()
       for (const p of [...users, ...builtins]) byId.set(p.manifest.id, p)
       packages.value = [...byId.values()]
+      syncDevPoll()
     } finally {
       loading.value = false
       ready.value = true
+    }
+  }
+
+  function syncDevPoll() {
+    const hasDev = packages.value.some(p => p.source === 'dev')
+    if (hasDev && !devPollTimer && typeof window !== 'undefined') {
+      devPollTimer = window.setInterval(() => {
+        void pollDevMtimes()
+      }, 1200)
+    } else if (!hasDev && devPollTimer) {
+      window.clearInterval(devPollTimer)
+      devPollTimer = null
+      devMtimeById.clear()
+    }
+  }
+
+  async function pollDevMtimes() {
+    if (!isTauri() || hotReloadBusy) return
+    const devIds = packages.value.filter(p => p.source === 'dev').map(p => p.manifest.id)
+    for (const id of devIds) {
+      try {
+        const mt = await invoke<number>('protocol_content_mtime', { id })
+        const prev = devMtimeById.get(id)
+        if (shouldHotReload(prev, mt)) {
+          await hotReloadProtocol(id)
+        }
+        devMtimeById.set(id, mt)
+      } catch {
+        // 单包失败不影响其余
+      }
+    }
+  }
+
+  /** Dev：源文件变更后 dispose → 清缓存 → 重载 → 恢复运行中实例 */
+  async function hotReloadProtocol(protocolId: string): Promise<void> {
+    if (hotReloadBusy) return
+    hotReloadBusy = true
+    try {
+      const runningIds = instances.value
+        .filter(i => i.manifest.id === protocolId && i.enabled)
+        .map(i => i.instanceId)
+      for (const instanceId of runningIds) {
+        await stopInstance(instanceId)
+      }
+      for (const inst of instances.value) {
+        if (inst.manifest.id === protocolId) {
+          moduleCache.delete(inst.instanceId)
+          ctxCache.delete(inst.instanceId)
+        }
+      }
+      await refreshPackages()
+      const pkg = getPackage(protocolId)
+      if (pkg) {
+        for (const inst of instances.value) {
+          if (inst.manifest.id === protocolId) {
+            inst.manifest = pkg.manifest
+            inst.variables = pkg.manifest.ui.variables || inst.variables
+          }
+        }
+      }
+      for (const instanceId of runningIds) {
+        try {
+          await startInstance(instanceId)
+          pushLog('info', instanceId, protocolId, 'Dev 热重载完成')
+        } catch (e) {
+          pushLog(
+            'error',
+            instanceId,
+            protocolId,
+            `Dev 热重载启动失败: ${e instanceof Error ? e.message : String(e)}`,
+          )
+        }
+      }
+      if (runningIds.length === 0) {
+        pushLog('info', '', protocolId, 'Dev 源文件已变更（当前无运行实例）')
+      }
+    } finally {
+      hotReloadBusy = false
     }
   }
 
@@ -92,6 +180,36 @@ export const useProtocolRuntime = defineStore('protocolRuntime', () => {
       { data, force },
     )
     await refreshPackages()
+    // 安装/覆盖后，同 id 协议实例须丢弃旧模块缓存，否则仍跑安装前的 Blob
+    for (const inst of instances.value) {
+      if (inst.manifest.id === info.id) {
+        moduleCache.delete(inst.instanceId)
+        ctxCache.delete(inst.instanceId)
+      }
+    }
+    return info.id
+  }
+
+  /** Dev：链接本地协议文件夹（不复制；改源文件可热重载） */
+  async function linkDevFolder(folderPath: string, force = false): Promise<string> {
+    if (!isTauri()) throw new Error('Dev 文件夹加载仅支持桌面应用')
+    const path = folderPath.trim()
+    if (!path) throw new Error('请填写协议文件夹路径')
+    const info = await invoke<{ id: string }>('link_protocol_dev', { path, force })
+    await refreshPackages()
+    for (const inst of instances.value) {
+      if (inst.manifest.id === info.id) {
+        moduleCache.delete(inst.instanceId)
+        ctxCache.delete(inst.instanceId)
+      }
+    }
+    // 建立基线 mtime，避免刚链接就误触发热重载
+    try {
+      const mt = await invoke<number>('protocol_content_mtime', { id: info.id })
+      devMtimeById.set(info.id, mt)
+    } catch {
+      /* ignore */
+    }
     return info.id
   }
 
@@ -142,6 +260,10 @@ export const useProtocolRuntime = defineStore('protocolRuntime', () => {
     ctxCache.delete(instanceId)
     timersByInstance.delete(instanceId)
     lastTickByInstance.delete(instanceId)
+    const { [instanceId]: _removed, ...restInfo } = infoByInstance.value
+    infoByInstance.value = restInfo
+    const { [instanceId]: _p, ...restProgress } = progressByInstance.value
+    progressByInstance.value = restProgress
   }
 
   /**
@@ -204,14 +326,31 @@ export const useProtocolRuntime = defineStore('protocolRuntime', () => {
     try {
       let module = moduleCache.get(instanceId)
       if (!module) {
-        const src = await readEntrySource(pkg)
-        module = await loadModuleFromSource(src, inst.manifest.id)
+        module = await loadProtocolModule(pkg)
       }
       const ctx = createContext({
         instanceId,
         protocolId: inst.manifest.id,
         channelId: inst.channelId,
         getParam: key => paramsByInstance.get(instanceId)?.[key],
+        setParam: patch => {
+          void setParams(instanceId, patch)
+        },
+        emitInfo: sample => {
+          const cur = infoByInstance.value[instanceId] || {}
+          infoByInstance.value = {
+            ...infoByInstance.value,
+            [instanceId]: upsertInstanceInfo(cur, sample),
+          }
+        },
+        emitProgress: sample => {
+          const cur = progressByInstance.value[instanceId] || {}
+          progressByInstance.value = {
+            ...progressByInstance.value,
+            [instanceId]: upsertProgress(cur, sample),
+          }
+        },
+        getQueries: () => instanceById(instanceId)?.manifest.ui.queries,
         pushLog: entry =>
           pushLog(entry.level, entry.instanceId, entry.protocolId, entry.msg),
         registerTimer: (kind, cb, ms) => {
@@ -261,6 +400,10 @@ export const useProtocolRuntime = defineStore('protocolRuntime', () => {
     }
     timersByInstance.set(instanceId, [])
     lastTickByInstance.delete(instanceId)
+    // 取消未完成的 ctx.request，再丢弃 module/ctx
+    ctxCache.get(instanceId)?._dispose()
+    moduleCache.delete(instanceId)
+    ctxCache.delete(instanceId)
     inst.enabled = false
     inst.status = 'idle'
   }
@@ -402,9 +545,20 @@ export const useProtocolRuntime = defineStore('protocolRuntime', () => {
     unsubRx = null
     if (tickTimer) window.clearInterval(tickTimer)
     tickTimer = null
+    if (devPollTimer) window.clearInterval(devPollTimer)
+    devPollTimer = null
+    devMtimeById.clear()
     moduleCache.clear()
     ctxCache.clear()
     ready.value = false
+  }
+
+  function getInstanceInfo(instanceId: string): Record<string, ProtocolInfoEntry> {
+    return infoByInstance.value[instanceId] || {}
+  }
+
+  function getInstanceProgress(instanceId: string): Record<string, ProtocolProgressEntry> {
+    return progressByInstance.value[instanceId] || {}
   }
 
   function clearLogs() {
@@ -418,14 +572,20 @@ export const useProtocolRuntime = defineStore('protocolRuntime', () => {
     loading,
     lastError,
     ready,
+    infoByInstance,
+    progressByInstance,
     refreshPackages,
     getPackage,
     installFromZip,
+    linkDevFolder,
+    hotReloadProtocol,
     removePackage,
     createInstance,
     removeInstance,
     setInstanceChannel,
     setParams,
+    getInstanceInfo,
+    getInstanceProgress,
     startInstance,
     stopInstance,
     toggleInstance,

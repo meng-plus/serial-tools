@@ -1,11 +1,16 @@
 //! 协议扩展包文件操作 — 管理 serial-tools-data/protocols/<id>/
 //!
 //! 只做包的管理与文件读取；协议运行时（校验/加载/生命周期）在前端。
+//! Dev：`protocols/<id>/.dev-link` 指向本地源目录，读写走源目录，供热重载。
 
 use crate::commands::fs_util::data_root;
 use crate::error::CommandError;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
+
+/// 目录内若存在该文件，则内容为绝对路径，表示 Dev 链接源目录
+const DEV_LINK_NAME: &str = ".dev-link";
 
 /// 协议 id 允许字符：小写字母 / 数字 / `-` / `_`
 fn valid_id(id: &str) -> bool {
@@ -82,6 +87,26 @@ pub struct ProtocolDirInfo {
     pub role: String,
     /// 是否具备完整 manifest（目录有效）
     pub valid: bool,
+    /// 是否为 Dev 文件夹链接（非 zip 安装副本）
+    pub is_dev: bool,
+    /// Dev 源目录绝对路径；非 Dev 为空
+    pub dev_path: Option<String>,
+}
+
+fn read_dev_link(install_dir: &Path) -> Option<PathBuf> {
+    let link = install_dir.join(DEV_LINK_NAME);
+    let s = std::fs::read_to_string(&link).ok()?;
+    let p = PathBuf::from(s.trim());
+    if p.is_dir() {
+        Some(p)
+    } else {
+        None
+    }
+}
+
+/// 解析实际内容根：Dev 链到源目录，否则为安装目录本身
+fn protocol_content_dir(install_dir: &Path) -> PathBuf {
+    read_dev_link(install_dir).unwrap_or_else(|| install_dir.to_path_buf())
 }
 
 fn read_manifest(dir: &Path) -> Result<ManifestMeta, CommandError> {
@@ -96,7 +121,20 @@ fn read_manifest(dir: &Path) -> Result<ManifestMeta, CommandError> {
     ManifestMeta::parse(&bytes)
 }
 
-/// 列出已安装协议
+fn info_from_meta(meta: ManifestMeta, is_dev: bool, dev_path: Option<String>) -> ProtocolDirInfo {
+    ProtocolDirInfo {
+        id: meta.id.clone(),
+        name: meta.name.unwrap_or_else(|| meta.id.clone()),
+        version: meta.version.unwrap_or_else(|| "0.0.0".to_string()),
+        api_version: meta.api_version.unwrap_or(0),
+        role: meta.role.unwrap_or_else(|| "passive".to_string()),
+        valid: true,
+        is_dev,
+        dev_path,
+    }
+}
+
+/// 列出已安装协议（含 Dev 链接）
 #[tauri::command]
 pub async fn list_protocols() -> Result<Vec<ProtocolDirInfo>, CommandError> {
     let dir = protocols_dir();
@@ -113,15 +151,12 @@ pub async fn list_protocols() -> Result<Vec<ProtocolDirInfo>, CommandError> {
         if !valid_id(&id) {
             continue;
         }
-        match read_manifest(&entry.path()) {
-            Ok(m) => out.push(ProtocolDirInfo {
-                id: m.id.clone(),
-                name: m.name.unwrap_or_else(|| m.id.clone()),
-                version: m.version.unwrap_or_else(|| "0.0.0".to_string()),
-                api_version: m.api_version.unwrap_or(0),
-                role: m.role.unwrap_or_else(|| "passive".to_string()),
-                valid: true,
-            }),
+        let install_dir = entry.path();
+        let is_dev = read_dev_link(&install_dir).is_some();
+        let content = protocol_content_dir(&install_dir);
+        let dev_path = read_dev_link(&install_dir).map(|p| p.display().to_string());
+        match read_manifest(&content) {
+            Ok(m) => out.push(info_from_meta(m, is_dev, dev_path)),
             Err(_) => out.push(ProtocolDirInfo {
                 id: id.clone(),
                 name: id.clone(),
@@ -129,6 +164,8 @@ pub async fn list_protocols() -> Result<Vec<ProtocolDirInfo>, CommandError> {
                 api_version: 0,
                 role: String::from("passive"),
                 valid: false,
+                is_dev,
+                dev_path,
             }),
         }
     }
@@ -136,7 +173,7 @@ pub async fn list_protocols() -> Result<Vec<ProtocolDirInfo>, CommandError> {
     Ok(out)
 }
 
-/// 读取协议包内文本文件（manifest / main.js 等）
+/// 读取协议包内文本文件（manifest / main.js 等；Dev 走源目录）
 #[tauri::command]
 pub async fn read_protocol_file(id: String, rel_path: String) -> Result<String, CommandError> {
     if !valid_id(&id) {
@@ -153,11 +190,131 @@ pub async fn read_protocol_file(id: String, rel_path: String) -> Result<String, 
             rel
         )));
     }
-    let base = protocols_dir().join(&id);
+    let install_dir = protocols_dir().join(&id);
+    if !install_dir.exists() {
+        return Err(CommandError::InvalidRequest(format!("协议 {} 未安装", id)));
+    }
+    let base = protocol_content_dir(&install_dir);
     let p = base.join(&rel);
     let s = std::fs::read_to_string(&p)
         .map_err(|e| CommandError::InvalidRequest(format!("读取 {} 失败: {}", rel, e)))?;
     Ok(s)
+}
+
+/// 协议内容树最大修改时间（毫秒，供 Dev 热重载轮询）
+#[tauri::command]
+pub async fn protocol_content_mtime(id: String) -> Result<u64, CommandError> {
+    if !valid_id(&id) {
+        return Err(CommandError::InvalidRequest("非法的协议 id".to_string()));
+    }
+    let install_dir = protocols_dir().join(&id);
+    if !install_dir.exists() {
+        return Err(CommandError::InvalidRequest(format!("协议 {} 未安装", id)));
+    }
+    let content = protocol_content_dir(&install_dir);
+    Ok(max_content_mtime(&content))
+}
+
+fn max_content_mtime(root: &Path) -> u64 {
+    let allowed = [
+        ".js", ".mjs", ".yaml", ".yml", ".json", ".md", ".txt", ".d.ts",
+    ];
+    let mut max_ms = 0u64;
+    fn walk(dir: &Path, allowed: &[&str], max_ms: &mut u64) {
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in rd.flatten() {
+            let path = entry.path();
+            let Ok(ft) = entry.file_type() else {
+                continue;
+            };
+            if ft.is_dir() {
+                walk(&path, allowed, max_ms);
+                continue;
+            }
+            let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+            if name == DEV_LINK_NAME || name.starts_with('.') {
+                continue;
+            }
+            if !allowed.iter().any(|s| name.ends_with(s)) {
+                continue;
+            }
+            if let Ok(meta) = entry.metadata() {
+                if let Ok(modified) = meta.modified() {
+                    let ms = modified
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0);
+                    if ms > *max_ms {
+                        *max_ms = ms;
+                    }
+                }
+            }
+        }
+    }
+    walk(root, &allowed, &mut max_ms);
+    max_ms
+}
+
+/// 将本地文件夹注册为 Dev 协议（不复制文件，写入 .dev-link）
+#[tauri::command]
+pub async fn link_protocol_dev(
+    path: String,
+    force: Option<bool>,
+) -> Result<ProtocolDirInfo, CommandError> {
+    ensure_protocols_dir()?;
+    link_protocol_dev_to(Path::new(&path), &protocols_dir(), force.unwrap_or(false))
+}
+
+/// 可测：在 install_root 下创建 Dev 链接
+fn link_protocol_dev_to(
+    src: &Path,
+    install_root: &Path,
+    force: bool,
+) -> Result<ProtocolDirInfo, CommandError> {
+    if !src.is_dir() {
+        return Err(CommandError::InvalidRequest(format!(
+            "路径不是目录: {}",
+            src.display()
+        )));
+    }
+    let src = std::fs::canonicalize(src).map_err(|e| {
+        CommandError::InvalidRequest(format!("无法解析目录 {}: {}", src.display(), e))
+    })?;
+    let meta = read_manifest(&src)?;
+    if !valid_id(&meta.id) {
+        return Err(CommandError::InvalidRequest(
+            "manifest 中 id 非法".to_string(),
+        ));
+    }
+    let entry = meta.entry.clone().unwrap_or_else(|| "main.js".to_string());
+    if !src.join(&entry).is_file() {
+        return Err(CommandError::InvalidRequest(format!(
+            "源目录缺少入口文件: {}",
+            entry
+        )));
+    }
+
+    let target_dir = install_root.join(&meta.id);
+    if target_dir.exists() {
+        let existing_dev = read_dev_link(&target_dir).is_some();
+        // zip 安装包需 force；已有 Dev 链接允许直接改指向
+        if !force && !existing_dev {
+            return Err(CommandError::InvalidRequest(format!(
+                "协议 {} 已通过 zip 安装，Dev 链接需勾选强制覆盖",
+                meta.id
+            )));
+        }
+        std::fs::remove_dir_all(&target_dir).map_err(|e| CommandError::Internal(e.to_string()))?;
+    }
+
+    std::fs::create_dir_all(&target_dir).map_err(|e| CommandError::Internal(e.to_string()))?;
+    let link_path = target_dir.join(DEV_LINK_NAME);
+    std::fs::write(&link_path, src.display().to_string())
+        .map_err(|e| CommandError::Internal(format!("写入 .dev-link 失败: {}", e)))?;
+
+    Ok(info_from_meta(meta, true, Some(src.display().to_string())))
 }
 
 /// 解压 zip（base64 → Vec<u8> 由前端转 number[]），校验并落盘
@@ -327,14 +484,7 @@ fn install_zip_to(
     }
     std::fs::rename(&staging, &target_dir).map_err(|e| CommandError::Internal(e.to_string()))?;
 
-    Ok(ProtocolDirInfo {
-        id: meta.id.clone(),
-        name: meta.name.unwrap_or_else(|| meta.id.clone()),
-        version: meta.version.unwrap_or_else(|| "0.0.0".to_string()),
-        api_version: meta.api_version.unwrap_or(0),
-        role: meta.role.unwrap_or_else(|| "passive".to_string()),
-        valid: true,
-    })
+    Ok(info_from_meta(meta, false, None))
 }
 
 #[tauri::command]
@@ -563,6 +713,40 @@ mod tests {
             std::fs::read_to_string(tmp.path().join("demo/main.js")).unwrap(),
             "v1"
         );
+    }
+
+    #[test]
+    fn link_dev_reads_from_source() {
+        let src = tempfile::tempdir().unwrap();
+        std::fs::write(src.path().join("manifest.yaml"), MANIFEST).unwrap();
+        std::fs::write(src.path().join("main.js"), b"export default { init() {} }").unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let info = link_protocol_dev_to(src.path(), root.path(), false).unwrap();
+        assert!(info.is_dev);
+        assert_eq!(info.id, "demo");
+        let install = root.path().join("demo");
+        assert!(install.join(DEV_LINK_NAME).exists());
+        assert!(!install.join("main.js").exists());
+        let content = protocol_content_dir(&install);
+        assert_eq!(
+            std::fs::read_to_string(content.join("main.js")).unwrap(),
+            "export default { init() {} }"
+        );
+        let mt = max_content_mtime(&content);
+        assert!(mt > 0);
+    }
+
+    #[test]
+    fn link_dev_rejects_zip_without_force() {
+        let root = tempfile::tempdir().unwrap();
+        let zip = make_zip(&[("manifest.yaml", MANIFEST.as_bytes()), ("main.js", b"x")]);
+        install_zip_to(&zip, root.path(), false).unwrap();
+        let src = tempfile::tempdir().unwrap();
+        std::fs::write(src.path().join("manifest.yaml"), MANIFEST).unwrap();
+        std::fs::write(src.path().join("main.js"), b"y").unwrap();
+        assert!(link_protocol_dev_to(src.path(), root.path(), false).is_err());
+        link_protocol_dev_to(src.path(), root.path(), true).unwrap();
+        assert!(root.path().join("demo").join(DEV_LINK_NAME).exists());
     }
 
     /// 真实世界冒烟：加载仓库中的演示扩展包 zip 并安装（验证打包产物可被消费）

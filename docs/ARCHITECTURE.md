@@ -221,7 +221,7 @@ GB2312：UI 已移除；后端若收到 `gb2312` 按 GBK 兼容处理。
 - **file 参数**：值只存元数据 `{name,size,token}`，字节在运行时瞬态缓存，不落工作区；导入/重启后需重选文件。
 - **RX 分发**：rxHub 订阅；从站角色用 `match`/`handle`，其它用 `onRx`。
 - **安全**：zip 安装做路径穿越防护、manifest 校验、剥唯一顶层目录、同/降版本需 force、临时目录解压后原子 rename。
-- **内置参考实现**：Modbus RTU/TCP 主站+从站（可同一通道主从闭环自测）；演示包 `public/protocols/demo/demo-passive.zip`。YMODEM 文件传输为**手动安装**的演示包（`public/protocols/demo/ymodem.zip`，见 [YMODEM.md](./protocol-ext/YMODEM.md)）。
+- **内置参考实现**：Modbus RTU 主站+从站（可同一通道主从闭环自测）。演示包 `public/protocols/demo/demo-passive.zip`；Modbus TCP 主/从（`modbus-tcp-{master,slave}.zip`）与 YMODEM 文件传输（`ymodem.zip`）为**手动安装**的演示包，每个扩展包目录内自带 `README.md` 说明（应用内「协议扩展」页可查看）。
 - 测试：后端 `protocol_fs` 单测（含真实 demo zip 冒烟）；前端 `src/protocol-ext/*.test.ts`。
 - 能力边界：协议运行在前端进程，**不占用 Rust 侧 I/O**；它只是消费 rxHub 数据 + `send_data` 发送。
 
