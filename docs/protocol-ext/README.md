@@ -10,7 +10,7 @@
 
 ```
 my-protocol/
-├── manifest.yaml   # 协议元信息（id/名称/参数表/动作表/变量表）
+├── manifest.yaml   # 协议元信息（id/名称/参数表/动作表/变量表/分区表）
 ├── main.js         # 协议实现（ESM 默认导出，使用注入的 ctx）
 └── main.d.ts       # 可选：ABI 类型提示（编辑器用，不参与运行）
 ```
@@ -26,10 +26,14 @@ my-protocol/
 内置协议（参考实现，可照抄）：
 
 - `modbus-rtu-master` / `modbus-rtu-slave` —— RTU 主站轮询 / 从站应答（CRC16-Modbus），同一通道上可做本地主从闭环
-- `modbus-tcp-master` / `modbus-tcp-slave` —— 同上，MBAP 封装
 
-演示包：`public/protocols/demo/demo-passive.zip`（可直接在「协议扩展」页安装体验）。
-YMODEM 文件传输（双向、固件升级/备份）：`public/protocols/demo/ymodem.zip`，见 [YMODEM.md](./YMODEM.md)。
+演示包（需在「协议扩展」页手动安装 zip）：
+
+- `modbus-tcp-master` / `modbus-tcp-slave` —— 同上，MBAP 封装（`public/protocols/demo/modbus-tcp-{master,slave}.zip`）
+- `demo-passive` —— 被动解析示例（`public/protocols/demo/demo-passive.zip`）
+- YMODEM 文件传输（双向、固件升级/备份）：`public/protocols/demo/ymodem.zip`，说明见包内 `README.md`
+
+> 每个扩展包目录内都自带 `README.md`（安装 / 使用 / 参数 / 实现要点），应用内「协议扩展」页可点「说明」直接查看；仓库内可直接读 `public/protocols/demo/<id>/README.md`。
 
 ## 文档导航
 
@@ -39,7 +43,6 @@ YMODEM 文件传输（双向、固件升级/备份）：`public/protocols/demo/y
 | [ABI.md](./ABI.md) | 协议实现体（main.js）API：生命周期 / ctx / utils / 变量与数据导出 |
 | [AUTHORING.md](./AUTHORING.md) | 从零写一个协议包的完整流程（被动 / 主站 / 从站） |
 | [TEMPLATES.md](./TEMPLATES.md) | 内置模板说明与复制方法 |
-| [YMODEM.md](./YMODEM.md) | YMODEM 文件传输扩展包：安装 / 使用 / 实现要点 |
 | [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) | 常见问题排查 |
 
 ## 术语
@@ -58,10 +61,17 @@ YMODEM 文件传输（双向、固件升级/备份）：`public/protocols/demo/y
 │                                                                    │
 │  useProtocolRuntime（pinia store, src/protocol-ext/manager.ts）    │
 │    ├─ loader：加载内置(fetch) / 用户包(IPC) 的 manifest + main.js  │
-│    ├─ moduleCache：Blob URL 动态 import 的模块缓存                  │
+│    ├─ moduleCache：loadProtocolModule 的模块缓存（多文件图）          │
 │    ├─ rxHub 订阅 → match/handle(从站) 或 onRx(其它)                 │
 │    ├─ 每 50ms tick → onTick                                        │
 │    └─ valueBus.push ← ctx.emitVar                                  │
+│                                                                    │
+│  ProtocolPanelView（通道工作区协议面板）                             │
+│    ├─ 分组卡片（ui.groups）：按设备/数据分区 + 组内读/写按钮         │
+│    ├─ register_grid：寄存器网格（双击写值）                         │
+│    ├─ value：数据卡片（最新值+历史抽屉）                             │
+│    ├─ chart：波形图（SeriesChart 复用组件，echarts 折线）           │
+│    └─ 面板唯一不可关闭，生命周期跟随实例                             │
 └───────────────┬────────────────────────────────────────────────────┘
                 │ invoke: list/read/install/remove_protocol
 ┌───────────────▼───────────────────────────────────────────────────┐
@@ -70,4 +80,4 @@ YMODEM 文件传输（双向、固件升级/备份）：`public/protocols/demo/y
 └───────────────────────────────────────────────────────────────────┘
 ```
 
-> 数据发送统一走 `ctx.sendHex`（内部调用 `send_data`，无后缀追加）；通道收到数据由 rxHub 分发。协议实例不直接碰 store，只通过注入的 ctx。
+> 数据发送统一走 `ctx.sendHex`（内部调用 `send_data`，无后缀追加）；通道收到数据由 rxHub 分发。协议实例不直接碰 store，只通过注入的 ctx。面板按 `ui.groups` 分区卡片渲染，支持 register_grid / value / chart / button 控件类型。

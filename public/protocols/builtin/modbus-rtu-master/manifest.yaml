@@ -15,6 +15,7 @@ ui:
   params:
     - key: poll
       label: 轮询表（设备 / 功能码 / 寄存器范围）
+      group: 数据采集
       type: table
       columns:
         - { key: name, label: 名称, type: text, default: "" }
@@ -24,6 +25,7 @@ ui:
         - { key: count, label: 数量, type: number, default: 10 }
     - key: cycle_ms
       label: 轮询周期（0 停止轮询）
+      group: 通讯行为
       type: number
       default: 500
       min: 0
@@ -31,6 +33,7 @@ ui:
       step: 50
     - key: timeout_ms
       label: 响应超时
+      group: 通讯行为
       type: number
       default: 300
       min: 50
@@ -38,12 +41,14 @@ ui:
       step: 10
     - key: retry
       label: 超时重试次数
+      group: 通讯行为
       type: number
       default: 2
       min: 0
       max: 10
     - key: byte_order
       label: 寄存器字节序
+      group: 通讯行为
       type: select
       default: be
       options:

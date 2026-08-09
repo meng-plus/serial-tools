@@ -19,14 +19,19 @@
           <span v-if="instance.lastRxAt" class="muted">最近收包 {{ instance.lastRxAt }}</span>
         </a-space>
         <a-space wrap>
-          <template v-for="a in instance.manifest.ui.actions || []" :key="a.id">
-            <a-button size="small" :disabled="!instance.enabled" @click="runAction(a.id)">
-              {{ a.label }}
-            </a-button>
+          <template v-if="showTopActions">
+            <template v-for="a in instance.manifest.ui.actions || []" :key="a.id">
+              <a-button size="small" :disabled="!instance.enabled" @click="runAction(a.id)">
+                {{ a.label }}
+              </a-button>
+            </template>
           </template>
           <a-button size="small" @click="openSwitch">切换通道</a-button>
           <a-button size="small" :type="instance.enabled ? 'default' : 'primary'" @click="toggle">
             {{ instance.enabled ? '停止' : '启动' }}
+          </a-button>
+          <a-button size="small" type="link" @click="goConfig">
+            参数配置
           </a-button>
         </a-space>
       </div>
@@ -39,24 +44,92 @@
         style="margin: 8px 0"
       />
 
-      <a-collapse :default-active-key="['params']" class="panel-collapse">
-        <a-collapse-panel key="params" header="参数配置">
-          <ParamForm
-            :params="instance.manifest.ui.params || []"
-            :model-value="instance.params"
-            @update:model-value="onParams"
-          />
-        </a-collapse-panel>
-      </a-collapse>
-
       <div class="panel-data">
-        <RegisterGrid
-          v-for="c in gridControls"
-          :key="c.id"
-          :channel-id="channelId"
-          :instance-id="instance.instanceId"
-          :grid="c.grid || { label: c.title || '数据' }"
-        />
+        <template v-if="sections.length > 1">
+          <div v-for="sec in sections" :key="sec.group?.id || '__default__'" class="panel-section">
+            <div class="section-head">
+              <strong>{{ sec.group?.label || '数据' }}</strong>
+              <a-space wrap>
+                <template v-for="b in sec.group?.buttons || []" :key="b.id">
+                  <a-button
+                    size="small"
+                    :type="b.kind === 'write' ? 'primary' : 'default'"
+                    :disabled="!instance.enabled"
+                    @click="runGroupAction(b)"
+                  >
+                    {{ b.label }}
+                  </a-button>
+                </template>
+              </a-space>
+            </div>
+            <div class="section-body">
+              <template v-for="c in sec.controls" :key="c.id">
+                <RegisterGrid
+                  v-if="c.type === 'register_grid'"
+                  :channel-id="channelId"
+                  :instance-id="instance.instanceId"
+                  :grid="c.grid || { label: c.title || '数据' }"
+                />
+                <InfoPanel
+                  v-else-if="c.type === 'info_panel'"
+                  :instance-id="instance.instanceId"
+                  :control="c"
+                />
+                <ProgressPanel
+                  v-else-if="c.type === 'progress'"
+                  :instance-id="instance.instanceId"
+                  :control="c"
+                />
+                <ValueCard
+                  v-else-if="c.type === 'value'"
+                  :channel-id="channelId"
+                  :control="c"
+                />
+                <SeriesChart
+                  v-else-if="c.type === 'chart'"
+                  :channel-id="channelId"
+                  :value-id="c.valueIds?.[0] || ''"
+                  :max-points="c.maxPoints"
+                  height="240px"
+                />
+              </template>
+              <a-empty v-if="sec.controls.length === 0" description="该分组暂无数据控件。" />
+            </div>
+          </div>
+        </template>
+        <template v-else>
+          <template v-for="c in sections[0]?.controls || []" :key="c.id">
+            <RegisterGrid
+              v-if="c.type === 'register_grid'"
+              :channel-id="channelId"
+              :instance-id="instance.instanceId"
+              :grid="c.grid || { label: c.title || '数据' }"
+            />
+            <InfoPanel
+              v-else-if="c.type === 'info_panel'"
+              :instance-id="instance.instanceId"
+              :control="c"
+            />
+            <ProgressPanel
+              v-else-if="c.type === 'progress'"
+              :instance-id="instance.instanceId"
+              :control="c"
+            />
+            <ValueCard
+              v-else-if="c.type === 'value'"
+              :channel-id="channelId"
+              :control="c"
+            />
+            <SeriesChart
+              v-else-if="c.type === 'chart'"
+              :channel-id="channelId"
+              :value-id="c.valueIds?.[0] || ''"
+              :max-points="c.maxPoints"
+              height="240px"
+            />
+          </template>
+          <a-empty v-if="(sections[0]?.controls || []).length === 0" description="该协议无实例面板（寄存器网格）声明，可在「参数配置」中调整。" />
+        </template>
       </div>
     </template>
 
@@ -104,18 +177,23 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { message } from 'ant-design-vue'
+import { useRouter } from 'vue-router'
 import { useConnectionStore, useWorkspaceStore, useProtocolRuntime } from '@/stores'
 import { errorMessage } from '@/utils/error'
-import ParamForm from '@/components/protocol/ParamForm.vue'
 import RegisterGrid from '@/components/protocol/RegisterGrid.vue'
+import ValueCard from '@/components/protocol/ValueCard.vue'
+import SeriesChart from '@/components/protocol/SeriesChart.vue'
+import InfoPanel from '@/components/protocol/InfoPanel.vue'
+import ProgressPanel from '@/components/protocol/ProgressPanel.vue'
 import { buildPanelControls } from '@/protocol-ext/dashboardTemplate'
-import type { DashboardControl, ProtocolInstance } from '@/protocol-ext/types'
+import type { DashboardControl, GroupButtonDef, ProtocolInstance } from '@/protocol-ext/types'
 
 const props = defineProps<{ channelId: string; viewId: string }>()
 
 const runtime = useProtocolRuntime()
 const connectionStore = useConnectionStore()
 const workspace = useWorkspaceStore()
+const router = useRouter()
 
 const view = computed(() =>
   workspace.viewsByChannel[props.channelId]?.find(v => v.id === props.viewId),
@@ -142,20 +220,75 @@ const channelLabel = computed(() => {
   return ch ? ch.portName || ch.channelId : (instance.value?.channelId || '')
 })
 
-const gridControls = computed<DashboardControl[]>(() => {
+/** 参与分区渲染的控件（register_grid / value / chart / info_panel / progress） */
+const DATA_TYPES: DashboardControl['type'][] = [
+  'register_grid',
+  'value',
+  'chart',
+  'info_panel',
+  'progress',
+]
+
+/** 分组已有按钮时，顶栏不再重复平铺全部 actions */
+const showTopActions = computed(() => {
+  const groups = instance.value?.manifest.ui.groups || []
+  return !groups.some(g => (g.buttons || []).length > 0)
+})
+
+interface PanelSection {
+  group?: { id: string; label: string; buttons?: GroupButtonDef[] }
+  controls: DashboardControl[]
+}
+
+/** 按 ui.groups 分区渲染；未声明 groups 或全部无归属时降级为单区 */
+const sections = computed<PanelSection[]>(() => {
   if (!instance.value) return []
   const controls = buildPanelControls(instance.value.manifest)
-  return controls.filter(c => c.type === 'register_grid')
+  const groups = instance.value.manifest.ui.groups || []
+  const dataControls = controls.filter(c => DATA_TYPES.includes(c.type))
+  if (groups.length === 0) {
+    // 单区：全部数据控件（兼容旧行为）
+    return [{ controls: dataControls }]
+  }
+  const hasAnyGroup = controls.some(c => c.group)
+  if (!hasAnyGroup) {
+    // groups 声明了但没有控件归属：全部并入第一个分区（同默认生成归属）
+    return [{ group: groups[0], controls: dataControls }]
+  }
+  const sectionsOut: PanelSection[] = []
+  const defaultControls: DashboardControl[] = []
+  const byGroup = new Map<string, DashboardControl[]>()
+  for (const c of controls) {
+    if (!DATA_TYPES.includes(c.type)) continue
+    if (!c.group) defaultControls.push(c)
+    else {
+      const arr = byGroup.get(c.group) || []
+      arr.push(c)
+      byGroup.set(c.group, arr)
+    }
+  }
+  for (const g of groups) {
+    sectionsOut.push({ group: g, controls: byGroup.get(g.id) || [] })
+  }
+  if (defaultControls.length > 0) {
+    sectionsOut.push({ controls: defaultControls })
+  }
+  return sectionsOut
 })
+
+async function runGroupAction(b: GroupButtonDef) {
+  if (!instance.value) return
+  await runtime.runAction(instance.value.instanceId, b.action || b.id, b.args || {})
+}
 
 function bindFirst() {
   const inst = channelInstances.value[0]
   if (inst) workspace.updateViewConfig(props.channelId, props.viewId, { instanceId: inst.instanceId })
 }
 
-function onParams(v: Record<string, unknown>) {
-  if (!instance.value) return
-  runtime.setParams(instance.value.instanceId, diff(instance.value.params, v))
+/** 参数配置入口：跳转到「协议扩展」页（配置统一在该页负责） */
+function goConfig() {
+  void router.push({ name: 'protocol' })
 }
 
 function roleLabel(role: string): string {
@@ -184,14 +317,6 @@ async function toggle() {
   await runtime.toggleInstance(instance.value.instanceId)
 }
 
-function diff(prev: Record<string, unknown>, next: Record<string, unknown>) {
-  const patch: Record<string, unknown> = {}
-  for (const k of Object.keys(next)) {
-    if (JSON.stringify(prev[k]) !== JSON.stringify(next[k])) patch[k] = next[k]
-  }
-  return patch
-}
-
 // ---------- 切换通道 ----------
 
 const switchOpen = ref(false)
@@ -218,7 +343,9 @@ async function handleSwitchOk() {
   }
   switching.value = true
   try {
+    const oldChannelId = inst.channelId
     await runtime.setInstanceChannel(inst.instanceId, switchChannelId.value)
+    workspace.moveProtocolPanel(oldChannelId, switchChannelId.value, inst.instanceId)
     message.success('已切换通道')
     switchOpen.value = false
   } catch (e) {
@@ -238,8 +365,20 @@ async function handleSwitchOk() {
   flex-wrap: wrap;
   gap: 8px;
 }
-.panel-collapse :deep(.ant-collapse-content-box) { padding: 12px; }
 .panel-data { display: flex; flex-direction: column; gap: 8px; }
+.panel-section { border: 1px solid #f0f0f0; border-radius: 6px; overflow: hidden; }
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #fafafa;
+  border-bottom: 1px solid #f0f0f0;
+  font-size: 13px;
+}
+.section-body { padding: 8px 12px; display: flex; flex-direction: column; gap: 8px; }
 .muted { color: rgba(0, 0, 0, 0.45); font-size: 12px; }
 .panel-empty { text-align: center; }
 .panel-empty p { color: rgba(0, 0, 0, 0.45); margin-bottom: 12px; }

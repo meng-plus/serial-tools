@@ -23,6 +23,8 @@ export function buildDefaultControls(manifest: ProtocolManifest): DashboardContr
   const controls: DashboardControl[] = []
   const actions = manifest.ui.actions || []
   const tableParam = (manifest.ui.params || []).find(p => p.type === 'table')
+  // 默认网格归属第一个分组（若声明了 groups，便于面板按分区卡片展示）
+  const defaultGroup = manifest.ui.groups?.[0]?.id
 
   if (manifest.role === 'master') {
     controls.push({
@@ -32,6 +34,7 @@ export function buildDefaultControls(manifest: ProtocolManifest): DashboardContr
       col: 0,
       w: 12,
       h: 8,
+      group: defaultGroup,
       title: '寄存器',
       grid: {
         label: '寄存器',
@@ -49,6 +52,7 @@ export function buildDefaultControls(manifest: ProtocolManifest): DashboardContr
       col: 0,
       w: 12,
       h: 8,
+      group: defaultGroup,
       title: '寄存器 / 线圈',
       grid: {
         label: '寄存器 / 线圈',
@@ -67,6 +71,7 @@ export function buildDefaultControls(manifest: ProtocolManifest): DashboardContr
       col: 0,
       w: 12,
       h: 6,
+      group: defaultGroup,
       title: '变量',
       grid: {
         label: '变量',
@@ -86,6 +91,7 @@ export function buildDefaultControls(manifest: ProtocolManifest): DashboardContr
         col: i * 2,
         w: 2,
         h: 2,
+        group: defaultGroup,
         title: a.label,
         actionId: a.id,
         actionParams: {},

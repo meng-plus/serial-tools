@@ -1,8 +1,10 @@
 <template>
   <div class="param-form">
-    <div v-for="p in params" :key="p.key" class="param-row">
-      <div class="param-label">{{ p.label }}</div>
-      <div class="param-control">
+    <div v-for="g in grouped" :key="g.label || '__default__'" class="param-group">
+      <div v-if="g.label" class="param-group-title">{{ g.label }}</div>
+      <div v-for="p in g.params" :key="p.key" class="param-row">
+        <div class="param-label">{{ p.label }}</div>
+        <div class="param-control">
         <!-- number -->
         <a-input-number
           v-if="p.type === 'number'"
@@ -89,6 +91,17 @@
                 :value="toText(record[column.key])"
                 @change="(e: Event) => updateCell(p, record, column.key as string, (e.target as HTMLInputElement).value)"
               />
+              <a-button
+                v-else
+                size="small"
+                type="text"
+                danger
+                :disabled="toRows(modelValue[p.key]).length <= 1"
+                title="删除此行"
+                @click="removeRow(p, record)"
+              >
+                删除
+              </a-button>
             </template>
           </a-table>
           <a-button size="small" type="dashed" block style="margin-top: 4px" @click="addRow(p)">
@@ -96,6 +109,7 @@
           </a-button>
         </div>
         <span v-else class="unsupported">不支持的类型</span>
+        </div>
       </div>
     </div>
   </div>
@@ -104,11 +118,27 @@
 <script setup lang="ts">
 import type { ParamDef } from '@/protocol-ext/types'
 import { cacheFileBytes, dropCachedFile } from '@/protocol-ext/fileCache'
+import { computed } from 'vue'
 
 const props = defineProps<{
   params: ParamDef[]
   modelValue: Record<string, unknown>
 }>()
+
+/** 按 group 分组（保持原顺序）；未声明 group 的归入默认分组（无标题） */
+const grouped = computed(() => {
+  const order: string[] = []
+  const map = new Map<string, { label: string; params: ParamDef[] }>()
+  for (const p of props.params) {
+    const label = p.group || ''
+    if (!map.has(label)) {
+      map.set(label, { label, params: [] })
+      order.push(label)
+    }
+    map.get(label)!.params.push(p)
+  }
+  return order.map(k => map.get(k)!)
+})
 
 const emit = defineEmits<{
   (e: 'update:modelValue', v: Record<string, unknown>): void
@@ -193,10 +223,23 @@ function updateCell(p: ParamDef, record: Record<string, unknown>, key: string, v
   rows[idx] = { ...rows[idx], [key]: value }
   update(p.key, rows)
 }
+
+function removeRow(p: ParamDef, record: Record<string, unknown>) {
+  const rows = toRows(props.modelValue[p.key]).filter(r => r.__row__ !== record.__row__)
+  update(p.key, rows)
+}
 </script>
 
 <style scoped>
 .param-form { display: flex; flex-direction: column; gap: 12px; }
+.param-group { display: flex; flex-direction: column; gap: 12px; }
+.param-group + .param-group { padding-top: 12px; border-top: 1px dashed #f0f0f0; }
+.param-group-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.85);
+  padding-bottom: 4px;
+}
 .param-row { display: flex; flex-direction: column; gap: 4px; }
 .param-label { font-size: 13px; color: rgba(0, 0, 0, 0.65); }
 .param-control { width: 100%; }

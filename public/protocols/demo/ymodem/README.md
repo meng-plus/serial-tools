@@ -10,7 +10,7 @@
 ## 安装
 
 1. 打开「协议扩展」页 → 点「安装扩展包 (zip)」。
-2. 选择 `public/protocols/demo/ymodem.zip`（或自行压缩 `public/protocols/demo/ymodem/` 目录内容：manifest.yaml + main.js）。
+2. 选择 `public/protocols/demo/ymodem.zip`（或自行压缩本目录内容：manifest.yaml + main.js）。
 3. 安装完成后点「创建实例」，选择 YMODEM 协议、绑定串口 / TCP 通道。
 
 ## 使用步骤

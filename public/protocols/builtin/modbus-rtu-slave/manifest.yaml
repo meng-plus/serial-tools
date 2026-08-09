@@ -15,12 +15,14 @@ ui:
   params:
     - key: addr
       label: 从站地址
+      group: 基本
       type: number
       default: 1
       min: 1
       max: 247
     - key: coils
       label: 线圈表（01 读 / 05 写单线圈 / 0F 写多线圈）
+      group: 数据表
       type: table
       columns:
         - { key: addr, label: 线圈地址, type: number, default: 0 }
@@ -28,6 +30,7 @@ ui:
         - { key: name, label: 名称, type: text, default: "" }
     - key: registers
       label: 保持寄存器表（03 读 / 06 写单 / 10 写多）
+      group: 数据表
       type: table
       columns:
         - { key: reg, label: 寄存器地址, type: number, default: 0 }
@@ -36,6 +39,7 @@ ui:
         - { key: unit, label: 单位, type: text, default: "" }
     - key: byte_order
       label: 数据字节序
+      group: 基本
       type: select
       default: be
       options:

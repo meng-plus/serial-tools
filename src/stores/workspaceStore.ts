@@ -185,6 +185,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return null
     }
     ensureChannel(channelId)
+    // 协议实例面板为唯一视图：同一实例只允许一个面板，且应经 addView 幂等创建
+    if (type === 'protocol_panel') {
+      const instanceId = String(config.instanceId || '')
+      const existing = (viewsByChannel.value[channelId] || []).find(
+        v => v.type === 'protocol_panel' && String(v.config?.instanceId || '') === instanceId,
+      )
+      if (existing) {
+        activeViewIdByChannel.value = {
+          ...activeViewIdByChannel.value,
+          [channelId]: existing.id,
+        }
+        return existing
+      }
+    }
     const initialConfig =
       type === 'chart'
         ? { valueIds: [] as string[], maxPoints: 100, ...config }
@@ -208,7 +222,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   function closeView(channelId: string, viewId: string) {
-    const list = (viewsByChannel.value[channelId] || []).filter(v => v.id !== viewId)
+    const list = (viewsByChannel.value[channelId] || []).filter(v => {
+      // 协议实例面板为唯一视图：不可关闭
+      if (v.id === viewId && v.type === 'protocol_panel') return true
+      return v.id !== viewId
+    })
     if (list.length === 0) {
       // 至少保留一个终端
       const fallback = defaultViews(channelId)
@@ -226,6 +244,30 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         [channelId]: list[0].id,
       }
     }
+  }
+
+  /** 删除协议实例时清理其面板视图（不受「不可关闭」限制；至少保留一个终端） */
+  function removeProtocolPanel(channelId: string, instanceId: string) {
+    const list = (viewsByChannel.value[channelId] || []).filter(
+      v => !(v.type === 'protocol_panel' && String(v.config?.instanceId || '') === instanceId),
+    )
+    if (list.length === 0) {
+      const fallback = defaultViews(channelId)
+      viewsByChannel.value = { ...viewsByChannel.value, [channelId]: fallback }
+      activeViewIdByChannel.value = {
+        ...activeViewIdByChannel.value,
+        [channelId]: fallback[0].id,
+      }
+      return
+    }
+    viewsByChannel.value = { ...viewsByChannel.value, [channelId]: list }
+  }
+
+  /** 实例换通道：旧通道移除面板，新通道补齐（避免遗留不可关闭的孤儿标签） */
+  function moveProtocolPanel(fromChannelId: string, toChannelId: string, instanceId: string) {
+    if (!instanceId || fromChannelId === toChannelId) return
+    if (fromChannelId) removeProtocolPanel(fromChannelId, instanceId)
+    if (toChannelId) ensureProtocolPanels(toChannelId, [instanceId])
   }
 
   function removeChannel(channelId: string) {
@@ -329,6 +371,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     ensureProtocolPanels,
     addView,
     closeView,
+    removeProtocolPanel,
+    moveProtocolPanel,
     removeChannel,
     updateViewConfig,
     replaceViewsFromTemplates,
