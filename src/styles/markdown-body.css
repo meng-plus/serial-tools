@@ -1,0 +1,55 @@
+/* 共享 Markdown 正文样式（协议 README / 更新说明等） */
+.markdown-body {
+  max-height: 62vh;
+  overflow: auto;
+  font-size: 13px;
+  line-height: 1.7;
+  color: rgba(0, 0, 0, 0.85);
+  word-break: break-word;
+}
+.markdown-body h1 { font-size: 18px; border-bottom: 1px solid #f0f0f0; padding-bottom: 6px; }
+.markdown-body h2 { font-size: 16px; margin-top: 16px; }
+.markdown-body h3 { font-size: 14px; }
+.markdown-body h4 { font-size: 13px; }
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 {
+  font-weight: 600;
+}
+.markdown-body p { margin: 6px 0; }
+.markdown-body ul,
+.markdown-body ol { margin: 6px 0; padding-left: 22px; }
+.markdown-body li { margin: 2px 0; }
+.markdown-body code {
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: Consolas, monospace;
+  font-size: 12px;
+}
+.markdown-body pre {
+  background: #f6f8fa;
+  border: 1px solid #eee;
+  border-radius: 6px;
+  padding: 10px;
+  overflow: auto;
+  margin: 8px 0;
+}
+.markdown-body pre code { background: none; padding: 0; }
+.markdown-body blockquote {
+  margin: 8px 0;
+  padding: 4px 12px;
+  border-left: 3px solid #91caff;
+  color: rgba(0, 0, 0, 0.65);
+  background: rgba(0, 0, 0, 0.02);
+}
+.markdown-body hr { margin: 12px 0; border: none; border-top: 1px solid #f0f0f0; }
+.markdown-body table { border-collapse: collapse; margin: 8px 0; }
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid #e8e8e8;
+  padding: 4px 10px;
+  text-align: left;
+}
+.markdown-body th { background: rgba(0, 0, 0, 0.03); font-weight: 600; }

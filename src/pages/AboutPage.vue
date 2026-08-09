@@ -86,14 +86,18 @@
       <p v-if="updateModal.release" class="update-meta">
         当前版本 {{ APP_VERSION_LABEL }}，最新版发布于 {{ releaseDate(updateModal.release.published_at) }}
       </p>
-      <pre v-if="updateModal.release?.body" class="update-body">{{ updateModal.release.body }}</pre>
+      <div
+        v-if="updateModal.release?.body"
+        class="markdown-body update-notes"
+        v-html="renderedReleaseBody"
+      />
       <p v-else class="update-meta">可在版本发布页查看更新详情。</p>
     </a-modal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { ref, reactive, computed } from 'vue'
 import {
   UserOutlined, MailOutlined, TeamOutlined,
   SwapOutlined, CodeOutlined, FileTextOutlined, BugOutlined,
@@ -109,6 +113,7 @@ import {
   openExternal,
   type GitHubRelease,
 } from '@/utils/updater'
+import { renderMarkdown } from '@/utils/markdown'
 
 const QQ_GROUP = '790012859'
 /** QQ 客户端加群协议（无邀请码时尽力打开群资料） */
@@ -137,6 +142,11 @@ const updateModal = reactive<{
 }>({
   open: false,
   release: null,
+})
+
+const renderedReleaseBody = computed(() => {
+  const body = updateModal.release?.body
+  return body ? renderMarkdown(body) : ''
 })
 
 async function handleCheckUpdate() {
@@ -331,16 +341,11 @@ async function joinQqGroup() {
   margin: 0 0 12px;
   color: rgba(0, 0, 0, 0.65);
 }
-.update-body {
-  max-height: 320px;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-size: 13px;
-  line-height: 1.6;
-  background: rgba(0, 0, 0, 0.03);
+.update-notes {
+  max-height: 360px;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.02);
+  border: 1px solid #f0f0f0;
   border-radius: 8px;
-  padding: 12px;
-  margin: 0;
 }
 </style>

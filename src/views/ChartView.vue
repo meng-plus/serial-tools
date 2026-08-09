@@ -32,35 +32,23 @@
       v-else-if="selectedIds.length === 0"
       description="请在上方选择要订阅的 valueId"
     />
-    <v-chart v-else class="chart" :option="chartOption" autoresize />
+    <SeriesChart
+      v-else
+      :channel-id="channelId"
+      :value-ids="selectedIds"
+      :max-points="maxPoints"
+      height="100%"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch, onMounted } from 'vue'
 import { errorMessage } from '@/utils/error'
-import { use } from 'echarts/core'
-import { CanvasRenderer } from 'echarts/renderers'
-import { LineChart } from 'echarts/charts'
-import {
-  GridComponent,
-  TooltipComponent,
-  LegendComponent,
-  DataZoomComponent,
-} from 'echarts/components'
-import VChart from 'vue-echarts'
 import { message, Modal } from 'ant-design-vue'
 import { useValueBus, useProtocolStore, useConnectionStore, useWorkspaceStore } from '@/stores'
 import { exportTextToDisk, revealPath } from '@/utils/diskLog'
-
-use([
-  CanvasRenderer,
-  LineChart,
-  GridComponent,
-  TooltipComponent,
-  LegendComponent,
-  DataZoomComponent,
-])
+import SeriesChart from '@/components/protocol/SeriesChart.vue'
 
 const props = defineProps<{
   channelId: string
@@ -118,33 +106,6 @@ function persistConfig() {
 
 onMounted(loadConfig)
 watch(() => props.viewId, loadConfig)
-
-const chartOption = computed(() => {
-  void valueBus.series
-  const series = selectedIds.value.map((valueId, i) => {
-    const samples = valueBus.getSeries(props.channelId, valueId).slice(-maxPoints.value)
-    return {
-      name: valueId,
-      type: 'line' as const,
-      showSymbol: samples.length < 40,
-      smooth: true,
-      data: samples.map(s => [s.timestamp, s.value]),
-      color: COLORS[i % COLORS.length],
-    }
-  })
-  return {
-    animation: false,
-    tooltip: { trigger: 'axis' },
-    legend: { top: 0 },
-    grid: { left: 48, right: 24, top: 40, bottom: 48 },
-    dataZoom: [{ type: 'inside' }, { type: 'slider', height: 18 }],
-    xAxis: { type: 'category', boundaryGap: false },
-    yAxis: { type: 'value', scale: true },
-    series,
-  }
-})
-
-const COLORS = ['#1677ff', '#52c41a', '#fa8c16', '#eb2f96', '#722ed1', '#13c2c2']
 
 function clearSelectedSeries() {
   for (const id of selectedIds.value) {
@@ -204,9 +165,4 @@ function handleExport() {
 }
 .toolbar { flex-shrink: 0; }
 .label { font-size: 13px; color: rgba(0,0,0,0.45); }
-.chart {
-  flex: 1;
-  min-height: 320px;
-  width: 100%;
-}
 </style>

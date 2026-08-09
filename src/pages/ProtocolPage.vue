@@ -5,111 +5,179 @@
       type="warning"
       show-icon
       :message="runtime.lastError"
-      style="margin-bottom: 12px"
+      style="margin-bottom: 8px"
       closable
       @close="runtime.lastError = ''"
     />
-    <a-card size="small" title="协议扩展" style="margin-bottom: 12px">
-      <a-space wrap>
+
+    <!-- 顶栏：操作 + 创建实例（主路径） -->
+    <div class="page-toolbar">
+      <div class="page-toolbar-title">协议扩展</div>
+      <a-space wrap size="small">
         <a-button size="small" :loading="runtime.loading" @click="runtime.refreshPackages()">刷新</a-button>
-        <a-button size="small" type="primary" @click="triggerInstall">安装扩展包 (zip)</a-button>
-        <a-button size="small" type="primary" ghost @click="openCreateWizard">创建实例</a-button>
+        <a-button size="small" @click="triggerInstall">安装 zip</a-button>
+        <a-button v-if="isTauri()" size="small" @click="openDevLink">Dev 文件夹</a-button>
+        <a-button size="small" type="primary" @click="openCreateWizard">创建实例</a-button>
       </a-space>
-      <div v-if="runtime.packages.length === 0" style="margin-top: 12px" class="muted">
-        暂无可用协议（内置 Modbus 主站缺失或加载失败）。
-      </div>
-      <template v-if="userPackages.length > 0">
-        <a-divider style="margin: 12px 0" />
-        <div style="margin-bottom: 8px" class="muted">
-          已安装扩展包（目录：{{ protocolsDir || '…' }}）
-        </div>
-        <a-space wrap>
-          <a-tag v-for="p in userPackages" :key="p.manifest.id" color="geekblue" closable @close="handleUninstall(p.manifest.id)">
-            {{ p.manifest.name }} (v{{ p.manifest.version }})
-          </a-tag>
-        </a-space>
-        <a-button v-if="isTauri()" size="small" style="margin-top: 8px" @click="openProtocolsDir">
-          打开安装目录
-        </a-button>
+    </div>
+
+    <!-- 主区：实例优先 -->
+    <a-card size="small" class="inst-card" :bordered="false">
+      <template #title>
+        <span>运行实例</span>
+        <a-tag v-if="instances.length" style="margin-left: 8px">{{ instances.length }}</a-tag>
       </template>
-    </a-card>
-
-    <a-tabs v-if="instances.length > 0" type="card">
-      <a-tab-pane v-for="inst in instances" :key="inst.instanceId" :tab="instTitle(inst)">
-        <div class="inst-head">
-          <a-space wrap>
-            <a-tag color="blue">{{ inst.manifest.role }}</a-tag>
-            <a-tag :color="statusColor(inst.status)">{{ statusText(inst) }}</a-tag>
-            <a-tag v-if="!channelExists(inst.channelId)" color="error">通道不存在</a-tag>
-            <span class="muted">通道：{{ channelLabel(inst.channelId) }}</span>
-            <span v-if="inst.lastRxAt" class="muted">最近收包 {{ inst.lastRxAt }}</span>
-          </a-space>
-          <a-space wrap>
-            <template v-for="a in inst.manifest.ui.actions || []" :key="a.id">
-              <a-button size="small" :disabled="!inst.enabled" @click="runtime.runAction(inst.instanceId, a.id, {})">
-                {{ a.label }}
-              </a-button>
-            </template>
-            <a-button size="small" @click="openSwitchChannel(inst)">切换通道</a-button>
-            <a-button size="small" :type="inst.enabled ? 'default' : 'primary'" @click="handleToggle(inst)">
-              {{ inst.enabled ? '停止' : '启动' }}
-            </a-button>
-            <a-dropdown>
-              <a-button size="small">参数 / 数据</a-button>
-              <template #overlay>
-                <a-menu>
-                  <a-menu-item key="export-params" @click="handleExportParams(inst)">导出参数 (YAML)</a-menu-item>
-                  <a-menu-item key="import-params" @click="pickImport(inst)">导入参数 (JSON/YAML)</a-menu-item>
-                  <a-menu-item key="import-csv" @click="pickImportCsv(inst)">导入 CSV（表格参数）</a-menu-item>
-                  <a-menu-divider />
-                  <a-menu-item key="export-data" @click="handleExportData(inst)">导出读取数据 (CSV+JSON)</a-menu-item>
-                  <a-menu-divider />
-                  <a-menu-item key="remove" danger @click="handleRemove(inst)">移除实例</a-menu-item>
-                </a-menu>
+      <a-tabs v-if="instances.length > 0" type="card" size="small" class="inst-tabs">
+        <a-tab-pane v-for="inst in instances" :key="inst.instanceId" :tab="instTitle(inst)">
+          <div class="inst-head">
+            <a-space wrap size="small">
+              <a-tag color="blue">{{ inst.manifest.role }}</a-tag>
+              <a-tag :color="statusColor(inst.status)">{{ statusText(inst) }}</a-tag>
+              <a-tag v-if="!channelExists(inst.channelId)" color="error">通道不存在</a-tag>
+              <span class="muted">通道：{{ channelLabel(inst.channelId) }}</span>
+              <span v-if="inst.lastRxAt" class="muted">最近收包 {{ inst.lastRxAt }}</span>
+            </a-space>
+            <a-space wrap size="small">
+              <template v-for="a in inst.manifest.ui.actions || []" :key="a.id">
+                <a-button size="small" :disabled="!inst.enabled" @click="runtime.runAction(inst.instanceId, a.id, {})">
+                  {{ a.label }}
+                </a-button>
               </template>
-            </a-dropdown>
-          </a-space>
-        </div>
+              <a-button size="small" @click="openSwitchChannel(inst)">切换通道</a-button>
+              <a-button size="small" :type="inst.enabled ? 'default' : 'primary'" @click="handleToggle(inst)">
+                {{ inst.enabled ? '停止' : '启动' }}
+              </a-button>
+              <a-dropdown>
+                <a-button size="small">参数 / 数据</a-button>
+                <template #overlay>
+                  <a-menu>
+                    <a-menu-item key="export-params" @click="handleExportParams(inst)">导出参数 (YAML)</a-menu-item>
+                    <a-menu-item key="import-params" @click="pickImport(inst)">导入参数 (JSON/YAML)</a-menu-item>
+                    <a-menu-item key="import-csv" @click="pickImportCsv(inst)">导入 CSV（表格参数）</a-menu-item>
+                    <a-menu-divider />
+                    <a-menu-item key="export-data" @click="handleExportData(inst)">导出读取数据 (CSV+JSON)</a-menu-item>
+                    <a-menu-divider />
+                    <a-menu-item key="remove" danger @click="handleRemove(inst)">移除实例</a-menu-item>
+                  </a-menu>
+                </template>
+              </a-dropdown>
+            </a-space>
+          </div>
 
-        <a-alert
-          v-if="inst.status === 'error' && inst.error"
-          type="error"
-          show-icon
-          :message="inst.error"
-          style="margin: 12px 0"
-        />
+          <a-alert
+            v-if="inst.status === 'error' && inst.error"
+            type="error"
+            show-icon
+            :message="inst.error"
+            style="margin: 8px 0"
+          />
 
-        <a-collapse style="margin-top: 12px" :default-active-key="['params']">
-          <a-collapse-panel key="params" header="参数配置">
-            <ParamForm
-              :params="inst.manifest.ui.params || []"
-              :model-value="inst.params"
-              @update:model-value="v => runtime.setParams(inst.instanceId, diff(inst.params, v))"
-            />
-          </a-collapse-panel>
-        </a-collapse>
-      </a-tab-pane>
-    </a-tabs>
-    <a-empty v-else description="尚未创建协议实例" />
-
-    <a-card size="small" title="运行日志" style="margin-top: 16px">
-      <div class="log-box">
-        <div v-if="runtime.logs.length === 0" class="muted">暂无日志</div>
-        <div
-          v-for="(l, i) in runtime.logs.slice().reverse()"
-          :key="i"
-          class="log-line"
-          :class="'lv-' + l.level"
-        >
-          <span class="log-ts">{{ l.ts }}</span>
-          <span class="log-proto">{{ l.protocolId }}</span>
-          <span>{{ l.msg }}</span>
-        </div>
-      </div>
-      <a-button v-if="runtime.logs.length" size="small" style="margin-top: 8px" @click="runtime.clearLogs()">
-        清空日志
-      </a-button>
+          <a-collapse style="margin-top: 8px" :default-active-key="['params']" size="small">
+            <a-collapse-panel key="params" header="参数配置">
+              <ParamForm
+                :params="inst.manifest.ui.params || []"
+                :model-value="inst.params"
+                @update:model-value="v => runtime.setParams(inst.instanceId, diff(inst.params, v))"
+              />
+            </a-collapse-panel>
+          </a-collapse>
+        </a-tab-pane>
+      </a-tabs>
+      <a-empty v-else description="尚未创建协议实例，点击右上角「创建实例」开始">
+        <a-button type="primary" size="small" @click="openCreateWizard">创建实例</a-button>
+      </a-empty>
     </a-card>
+
+    <!-- 次要：可用协议合并为一行标签流，默认可折叠 -->
+    <a-collapse
+      v-model:activeKey="pkgCollapseKeys"
+      ghost
+      class="pkg-collapse"
+    >
+      <a-collapse-panel key="pkgs" :header="pkgPanelHeader">
+        <div v-if="runtime.packages.length === 0" class="muted">
+          暂无可用协议（内置缺失或加载失败）。可安装 zip 或链接 Dev 文件夹。
+        </div>
+        <div v-else class="pkg-flow">
+          <template v-if="builtinPackages.length">
+            <span class="pkg-group">内置</span>
+            <a-tag
+              v-for="p in builtinPackages"
+              :key="p.manifest.id"
+              color="blue"
+              class="pkg-tag"
+              @click="openDoc(p)"
+            >
+              {{ p.manifest.name }}
+              <span class="pkg-ver">v{{ p.manifest.version }}</span>
+            </a-tag>
+          </template>
+          <template v-if="userPackages.length">
+            <span class="pkg-group">已安装</span>
+            <a-tag
+              v-for="p in userPackages"
+              :key="p.manifest.id"
+              color="geekblue"
+              closable
+              class="pkg-tag"
+              @close="handleUninstall(p.manifest.id)"
+              @click="openDoc(p)"
+            >
+              {{ p.manifest.name }}
+              <span class="pkg-ver">v{{ p.manifest.version }}</span>
+            </a-tag>
+            <a-button
+              v-if="isTauri()"
+              type="link"
+              size="small"
+              class="pkg-dir-btn"
+              @click="openProtocolsDir"
+            >
+              目录
+            </a-button>
+          </template>
+          <template v-if="devPackages.length">
+            <span class="pkg-group">Dev</span>
+            <a-tag
+              v-for="p in devPackages"
+              :key="p.manifest.id"
+              color="orange"
+              closable
+              class="pkg-tag"
+              :title="p.dir || '源文件变更自动热重载'"
+              @close="handleUninstall(p.manifest.id)"
+              @click="openDoc(p)"
+            >
+              {{ p.manifest.name }}
+              <span class="pkg-ver">v{{ p.manifest.version }}</span>
+            </a-tag>
+          </template>
+        </div>
+        <div v-if="protocolsDir" class="muted pkg-hint">点击标签查看说明；Dev 监视源目录热重载</div>
+      </a-collapse-panel>
+    </a-collapse>
+
+    <!-- 日志默认折叠 -->
+    <a-collapse v-model:activeKey="logCollapseKeys" ghost class="log-collapse">
+      <a-collapse-panel key="logs" :header="logPanelHeader">
+        <div class="log-box">
+          <div v-if="runtime.logs.length === 0" class="muted">暂无日志</div>
+          <div
+            v-for="(l, i) in runtime.logs.slice().reverse()"
+            :key="i"
+            class="log-line"
+            :class="'lv-' + l.level"
+          >
+            <span class="log-ts">{{ l.ts }}</span>
+            <span class="log-proto">{{ l.protocolId }}</span>
+            <span>{{ l.msg }}</span>
+          </div>
+        </div>
+        <a-button v-if="runtime.logs.length" size="small" style="margin-top: 8px" @click="runtime.clearLogs()">
+          清空日志
+        </a-button>
+      </a-collapse-panel>
+    </a-collapse>
 
     <input ref="installInput" type="file" accept=".zip" style="display: none" @change="onInstallFile" />
     <input ref="importInput" type="file" accept=".yaml,.yml,.json,.txt,.csv,text/*" style="display: none" @change="onImportFile" />
@@ -142,6 +210,7 @@
               <b>{{ p.manifest.name }}</b>
               <a-tag color="blue" size="small">{{ roleLabel(p.manifest.role) }}</a-tag>
               <a-tag size="small">v{{ p.manifest.version }}</a-tag>
+              <a-button size="small" type="link" @click.stop="openDoc(p)">说明</a-button>
             </div>
             <div class="muted">{{ p.manifest.description || p.manifest.id }}</div>
             <div class="muted">
@@ -193,6 +262,18 @@
           message="所选通道未连接：实例可创建，但需通道连接后才能收发数据。"
           style="margin-bottom: 12px"
         />
+        <div v-if="(selectedManifest?.ui.presets || []).length > 0" class="preset-row">
+          <span class="preset-label">传感器型号 / 预设</span>
+          <a-select
+            v-model:value="wizard.presetId"
+            placeholder="选择预设（可选）"
+            allow-clear
+            style="width: 280px"
+            size="small"
+            :options="presetOptions"
+            @change="applyPreset"
+          />
+        </div>
         <ParamForm
           :params="selectedManifest?.ui.params || []"
           :model-value="wizard.params"
@@ -242,6 +323,39 @@
         </div>
       </template>
     </a-modal>
+
+    <a-modal
+      v-model:open="devLinkOpen"
+      title="从文件夹加载协议 (Dev)"
+      ok-text="链接"
+      :confirm-loading="devLinking"
+      @ok="submitDevLink"
+    >
+      <p class="muted" style="margin-bottom: 12px">
+        填写协议包目录的绝对路径（根层须含 manifest.yaml 与入口 main.js）。不复制文件；改源码后运行中实例会自动热重载。
+      </p>
+      <a-input
+        v-model:value="devLinkPath"
+        placeholder="例如 E:/path/to/my-protocol"
+        allow-clear
+      />
+      <a-checkbox v-model:checked="devLinkForce" style="margin-top: 12px">
+        强制覆盖已安装的同名 zip 包
+      </a-checkbox>
+    </a-modal>
+
+    <a-modal
+      v-model:open="docOpen"
+      :title="docTitle"
+      width="680px"
+      :footer="null"
+    >
+      <div
+        class="markdown-body"
+        v-html="renderedDoc"
+      />
+      <div v-if="!docText" class="muted doc-empty">该协议包未附带 README 说明文档。</div>
+    </a-modal>
   </div>
 </template>
 
@@ -254,8 +368,10 @@ import { exportTextToDisk, revealPath } from '@/utils/diskLog'
 import { invoke, isTauri } from '@/api'
 import ParamForm from '@/components/protocol/ParamForm.vue'
 import { defaultParams } from '@/protocol-ext/manifest'
+import { readPackageDoc } from '@/protocol-ext/loader'
+import { renderMarkdown } from '@/utils/markdown'
 import type { ChannelInfo } from '@/stores/connectionStore'
-import type { ProtocolInstance } from '@/protocol-ext/types'
+import type { ProtocolInstance, ProtocolPackage } from '@/protocol-ext/types'
 
 const runtime = useProtocolRuntime()
 const connectionStore = useConnectionStore()
@@ -264,6 +380,78 @@ const workspaceStore = useWorkspaceStore()
 const channels = computed(() => connectionStore.channelList)
 const instances = computed(() => runtime.instances)
 const userPackages = computed(() => runtime.packages.filter(p => p.source === 'user'))
+const devPackages = computed(() => runtime.packages.filter(p => p.source === 'dev'))
+const builtinPackages = computed(() => runtime.packages.filter(p => p.source === 'builtin'))
+
+/** 有实例时默认收起协议包列表，把可视区留给实例 */
+const pkgCollapseKeys = ref<string[]>([])
+const logCollapseKeys = ref<string[]>([])
+
+watch(
+  instances,
+  list => {
+    if (list.length === 0 && pkgCollapseKeys.value.length === 0) {
+      pkgCollapseKeys.value = ['pkgs']
+    }
+  },
+  { immediate: true },
+)
+
+const pkgPanelHeader = computed(() => {
+  const n = runtime.packages.length
+  const parts = [
+    builtinPackages.value.length ? `内置 ${builtinPackages.value.length}` : '',
+    userPackages.value.length ? `已装 ${userPackages.value.length}` : '',
+    devPackages.value.length ? `Dev ${devPackages.value.length}` : '',
+  ].filter(Boolean)
+  const detail = parts.length ? ` · ${parts.join(' / ')}` : ''
+  return `可用协议 (${n})${detail}`
+})
+
+const logPanelHeader = computed(() => {
+  const n = runtime.logs.length
+  return n > 0 ? `运行日志 (${n})` : '运行日志'
+})
+
+const devLinkOpen = ref(false)
+const devLinkPath = ref('')
+const devLinkForce = ref(false)
+const devLinking = ref(false)
+
+function openDevLink() {
+  devLinkPath.value = ''
+  devLinkForce.value = false
+  devLinkOpen.value = true
+}
+
+async function submitDevLink() {
+  devLinking.value = true
+  try {
+    const id = await runtime.linkDevFolder(devLinkPath.value, devLinkForce.value)
+    message.success(`已链接 Dev 协议: ${id}（源文件变更将自动热重载）`)
+    devLinkOpen.value = false
+  } catch (e) {
+    message.error(errorMessage(e))
+    throw e
+  } finally {
+    devLinking.value = false
+  }
+}
+
+const docOpen = ref(false)
+const docTitle = ref('')
+const docText = ref('')
+
+/** 已渲染的说明文档 HTML（未加载 / 无文档时为空） */
+const renderedDoc = computed(() => (docText.value && docText.value !== '加载中…' ? renderMarkdown(docText.value) : ''))
+
+async function openDoc(pkg: ProtocolPackage) {
+  docTitle.value = `${pkg.manifest.name} (${pkg.manifest.id}) 说明`
+  docText.value = '加载中…'
+  docOpen.value = true
+  const text = await readPackageDoc(pkg)
+  docText.value = text || ''
+}
 
 let protocolsDir = ref('')
 void loadProtocolsDir()
@@ -313,10 +501,12 @@ const wizard = reactive<{
   protocolId: string
   channelId: string
   params: Record<string, unknown>
+  presetId: string
 }>({
   protocolId: '',
   channelId: '',
   params: {},
+  presetId: '',
 })
 
 const selectedManifest = computed(() =>
@@ -347,6 +537,17 @@ const sortedChannels = computed(() => {
 })
 
 const mismatchCount = computed(() => channels.value.filter(ch => !channelStrictMatch(ch)).length)
+
+const presetOptions = computed(() =>
+  (selectedManifest.value?.ui.presets || []).map(p => ({ label: p.label, value: p.id })),
+)
+
+function applyPreset() {
+  const presets = selectedManifest.value?.ui.presets || []
+  const preset = presets.find(p => p.id === wizard.presetId)
+  if (!preset) return
+  wizard.params = { ...defaultParams(selectedManifest.value || ({} as never)), ...preset.params }
+}
 
 const wizardChannel = computed(() =>
   channels.value.find(ch => ch.channelId === wizard.channelId),
@@ -403,7 +604,10 @@ async function handleSwitchOk() {
   }
   switching.value = true
   try {
+    const oldChannelId = inst.channelId
     await runtime.setInstanceChannel(inst.instanceId, switchChannelId.value)
+    // 与通道工作区面板同步：避免旧通道遗留不可关闭的协议标签
+    workspaceStore.moveProtocolPanel(oldChannelId, switchChannelId.value, inst.instanceId)
     message.success('已切换通道')
     switchOpen.value = false
   } catch (e) {
@@ -430,6 +634,7 @@ async function handleToggle(inst: ProtocolInstance) {
 function openCreateWizard() {
   wizard.protocolId = ''
   wizard.channelId = ''
+  wizard.presetId = ''
   wizardStep.value = 0
   wizardOpen.value = true
 }
@@ -437,6 +642,7 @@ function openCreateWizard() {
 function resetWizardToChannel() {
   wizard.channelId = ''
   wizard.params = {}
+  wizard.presetId = ''
   wizardStep.value = 1
 }
 
@@ -510,6 +716,8 @@ function diff(prev: Record<string, unknown>, next: Record<string, unknown>) {
 
 async function handleRemove(inst: ProtocolInstance) {
   await runtime.removeInstance(inst.instanceId)
+  // 同步清理通道工作区中该实例的面板视图
+  workspaceStore.removeProtocolPanel(inst.channelId, inst.instanceId)
 }
 
 function triggerInstall() {
@@ -598,7 +806,39 @@ async function handleExportData(inst: ProtocolInstance) {
 </script>
 
 <style scoped>
-.protocol-page { display: flex; flex-direction: column; }
+.protocol-page {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+.page-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 0 2px;
+}
+.page-toolbar-title {
+  font-weight: 600;
+  font-size: 15px;
+}
+.inst-card {
+  background: #fafafa;
+  border: 1px solid #f0f0f0 !important;
+  border-radius: 8px;
+}
+.inst-card :deep(.ant-card-head) {
+  min-height: 40px;
+  padding: 0 12px;
+}
+.inst-card :deep(.ant-card-body) {
+  padding: 8px 12px 12px;
+}
+.inst-tabs :deep(.ant-tabs-nav) {
+  margin-bottom: 8px;
+}
 .inst-head {
   display: flex;
   align-items: center;
@@ -606,15 +846,73 @@ async function handleExportData(inst: ProtocolInstance) {
   flex-wrap: wrap;
   gap: 8px;
 }
+.pkg-collapse,
+.log-collapse {
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+}
+.pkg-collapse :deep(.ant-collapse-header),
+.log-collapse :deep(.ant-collapse-header) {
+  padding: 8px 12px !important;
+  align-items: center;
+}
+.pkg-collapse :deep(.ant-collapse-content-box),
+.log-collapse :deep(.ant-collapse-content-box) {
+  padding: 0 12px 10px !important;
+}
+.pkg-flow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 4px;
+}
+.pkg-group {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.45);
+  margin-left: 4px;
+  margin-right: 2px;
+  white-space: nowrap;
+}
+.pkg-group:first-child {
+  margin-left: 0;
+}
+.pkg-tag {
+  cursor: pointer;
+  margin-inline-end: 0 !important;
+}
+.pkg-ver {
+  opacity: 0.7;
+  margin-left: 2px;
+  font-size: 11px;
+}
+.pkg-dir-btn {
+  padding: 0 4px;
+  height: auto;
+}
+.pkg-hint {
+  margin-top: 6px;
+}
 .muted { color: rgba(0, 0, 0, 0.45); font-size: 12px; }
 .log-box {
-  max-height: 260px;
+  max-height: 180px;
   overflow: auto;
   font-size: 12px;
   font-family: Consolas, monospace;
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+.preset-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.preset-label {
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.65);
+  white-space: nowrap;
 }
 .wizard-list {
   display: flex;
@@ -643,4 +941,5 @@ async function handleExportData(inst: ProtocolInstance) {
 .log-proto { color: #1677ff; margin-right: 8px; }
 .lv-error { color: #cf1322; }
 .lv-warn { color: #d48806; }
+.doc-empty { margin-top: 12px; }
 </style>

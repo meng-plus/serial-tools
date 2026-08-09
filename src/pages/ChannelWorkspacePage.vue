@@ -54,7 +54,6 @@
               <a-menu-item key="chart">图表</a-menu-item>
               <a-menu-item key="chat">对话</a-menu-item>
               <a-menu-item key="vt100">VT100 终端</a-menu-item>
-              <a-menu-item key="protocol_panel">协议实例</a-menu-item>
             </a-menu>
           </template>
         </a-dropdown>
@@ -73,7 +72,7 @@
             v-for="v in workspace.activeViews"
             :key="v.id"
             :tab="v.title || v.type"
-            :closable="workspace.activeViews.length > 1"
+            :closable="v.type !== 'protocol_panel' && workspace.activeViews.length > 1"
           >
             <div
               class="view-body"
