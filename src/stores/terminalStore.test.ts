@@ -12,6 +12,11 @@ vi.mock('@/api/events', () => ({
   onLogEntry: vi.fn(() => Promise.resolve(() => {})),
 }))
 
+vi.mock('@/utils/appSettings', () => ({
+  loadAppSettings: () => ({ rxDebounceMs: 0 }),
+  saveAppSettings: () => {},
+}))
+
 import { setActivePinia, createPinia } from 'pinia'
 import { useTerminalStore } from '@/stores/terminalStore'
 import { useConnectionStore } from '@/stores/connectionStore'

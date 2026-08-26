@@ -153,7 +153,7 @@ remove_channel → cancel → shutdown → join 读线程(≤2s)
 
 | 事件 | 消费者 | 说明 |
 |------|--------|------|
-| `rx-data` | rxHub | 主路径；含 `seq`，去重后扇出各视图 |
+| `rx-data` | rxHub | 主路径；含 `seq`，去重后扇出各视图。支持节流：全局默认（`rxDebounceMs`，设置页可改，0=不节流）；订阅级 `debounceMs` 可覆盖。**节流式累积**：窗口内记录全部累积、窗口到期批量下发（定时器不重置，避免持续高频时数据积压；顺序保持、不丢数据）。VT100 / ChatView / terminalStore 等视图默认走全局节流，多视图高频时不卡顿；协议请求-响应类订阅（protocol-ext）显式 `{ debounceMs: 0 }` 即时分发 |
 | `connection-changed` | connectionStore | 含 `reason` / `server_clients` |
 | `log-entry` | logStore | |
 

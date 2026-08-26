@@ -108,7 +108,7 @@ export function createContext(opts: CreateContextOptions): ProtocolContextHandle
         {
           channelId: opts.channelId,
           sendHex,
-          subscribeRx: fn => rxHub.subscribe(fn, { direction: 'rx', channelId: opts.channelId }),
+          subscribeRx: fn => rxHub.subscribe(fn, { direction: 'rx', channelId: opts.channelId, debounceMs: 0 }),
           signal: abort.signal,
         },
         reqOpts,

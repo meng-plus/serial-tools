@@ -533,7 +533,7 @@ export const useProtocolRuntime = defineStore('protocolRuntime', () => {
   async function init() {
     if (ready.value) return
     await refreshPackages()
-    unsubRx = rxHub.subscribe(handleRx, { direction: 'rx' })
+    unsubRx = rxHub.subscribe(handleRx, { direction: 'rx', debounceMs: 0 })
     tickTimer = window.setInterval(tick, 50)
   }
 

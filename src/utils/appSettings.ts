@@ -7,6 +7,8 @@ export interface AppSettings {
   defaultBaudRate: number
   serialByteTimeoutMs: number
   serialFrameTimeoutMs: number
+  /** 接收刷新防抖毫秒数：0 表示不防抖（即时刷新） */
+  rxDebounceMs: number
 }
 
 const KEY = 'serial-tools-settings'
@@ -19,6 +21,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   defaultBaudRate: 115200,
   serialByteTimeoutMs: 50,
   serialFrameTimeoutMs: 200,
+  rxDebounceMs: 100,
 }
 
 export function loadAppSettings(): AppSettings {

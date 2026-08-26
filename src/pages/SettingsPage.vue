@@ -23,6 +23,11 @@
         <a-form-item label="默认波特率">
           <BaudRateSelect v-model="settings.defaultBaudRate" style="width: 220px" />
         </a-form-item>
+        <a-divider>接收刷新</a-divider>
+        <a-form-item label="接收刷新防抖（ms）">
+          <a-input-number v-model:value="settings.rxDebounceMs" :min="0" :max="5000" :step="10" style="width: 220px" />
+          <div class="hint">高频数据时合并刷新，0 表示不防抖。值越大渲染越省，但实时性略降。</div>
+        </a-form-item>
         <a-divider>串口超时分包（默认）</a-divider>
         <a-form-item label="字节间超时 byte_timeout（ms）">
           <a-input-number v-model:value="settings.serialByteTimeoutMs" :min="5" :max="5000" :step="10" style="width: 220px" />
@@ -47,10 +52,12 @@
 import { reactive, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import { useTerminalStore } from '@/stores'
+import { useRxHub } from '@/stores'
 import { loadAppSettings, saveAppSettings, type AppSettings } from '@/utils/appSettings'
 import BaudRateSelect from '@/components/BaudRateSelect.vue'
 
 const terminalStore = useTerminalStore()
+const rxHub = useRxHub()
 
 const settings = reactive<AppSettings>({ ...loadAppSettings() })
 
@@ -74,6 +81,7 @@ function handleSaveSettings() {
   saveAppSettings({ ...settings })
   terminalStore.encoding = settings.encoding
   terminalStore.maxLines = settings.maxLines
+  rxHub.setGlobalDebounceMs(settings.rxDebounceMs)
   message.success('设置已保存')
 }
 

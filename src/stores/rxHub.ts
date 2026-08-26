@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { invoke } from '@/api'
 import { onRxData, onRxGap, type RxEventPayload } from '@/api/events'
 import type { RxRecord } from '@/protocol/types'
+import { loadAppSettings, saveAppSettings } from '@/utils/appSettings'
 
 type Listener = (record: RxRecord) => void
 
@@ -10,6 +11,8 @@ type Listener = (record: RxRecord) => void
 export interface RxSubscribeOptions {
   direction?: 'rx' | 'tx' | 'all'
   channelId?: string
+  /** 防抖毫秒数：覆盖全局配置，0 表示即时分发（不防抖）。缺省时用全局默认值 */
+  debounceMs?: number
 }
 
 interface PacketRow {
@@ -46,6 +49,19 @@ export const useRxHub = defineStore('rxHub', () => {
   const maxRecords = 10000
   const seenKeys = new Set<string>()
   const listeners = new Set<Listener>()
+  /** 全局默认防抖毫秒数（0 = 不防抖），来自全局设置 localStorage */
+  const defaultDebounceMs = ref(loadAppSettings().rxDebounceMs)
+
+  function setGlobalDebounceMs(ms: number) {
+    defaultDebounceMs.value = ms
+    const s = loadAppSettings()
+    s.rxDebounceMs = ms
+    saveAppSettings(s)
+  }
+
+  function getGlobalDebounceMs() {
+    return defaultDebounceMs.value
+  }
 
   let unlisten: (() => void) | null = null
   let unlistenGap: (() => void) | null = null
@@ -55,13 +71,45 @@ export const useRxHub = defineStore('rxHub', () => {
   function subscribe(fn: Listener, opts?: RxSubscribeOptions): () => void {
     const dir = opts?.direction ?? 'all'
     const cid = opts?.channelId
+    // 订阅级 debounceMs 覆盖全局默认；0 表示即时分发；缺省用全局默认
+    const effectiveDebounceMs = opts?.debounceMs ?? defaultDebounceMs.value
+
+    let timeoutId: ReturnType<typeof setTimeout> | undefined = undefined
+    // 节流式累积：窗口内累积所有 record，窗口到期一次性批量下发；
+    // 不重置定时器（区别于防抖），持续高频时每窗口 flush 一次，不丢数据、不积压
+    let pending: RxRecord[] = []
+
+    const flush = () => {
+      timeoutId = undefined
+      const batch = pending
+      pending = []
+      for (const r of batch) fn(r)
+    }
+
     const wrapped: Listener = (record) => {
       if (dir !== 'all' && record.direction !== dir) return
       if (cid && record.channelId !== cid) return
-      fn(record)
+
+      // 仅当有效防抖值 > 0 时才节流批量分发，避免高频数据唤醒 UI 卡死
+      if (effectiveDebounceMs > 0) {
+        pending.push(record)
+        if (!timeoutId) {
+          timeoutId = setTimeout(flush, effectiveDebounceMs)
+        }
+      } else {
+        fn(record)
+      }
     }
+
     listeners.add(wrapped)
-    return () => listeners.delete(wrapped)
+    const cleanup = () => {
+      listeners.delete(wrapped)
+      if (timeoutId) clearTimeout(timeoutId)
+      pending = []
+    }
+    return () => {
+      cleanup()
+    }
   }
 
   function emit(record: RxRecord) {
@@ -221,6 +269,9 @@ export const useRxHub = defineStore('rxHub', () => {
   return {
     records,
     eventDriven,
+    defaultDebounceMs,
+    setGlobalDebounceMs,
+    getGlobalDebounceMs,
     init,
     dispose,
     subscribe,
